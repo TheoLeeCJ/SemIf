@@ -22,7 +22,9 @@ This baseline reads typed option probabilities directly from a model. No answer 
 
 ## Quick start
 
-Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
+Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model. Apple Silicon Macs can
+run direct, serial, and shared scoring through MPS or the optional MLX backend — see
+[Apple Silicon](docs/APPLE_SILICON.md):
 
 ```bash
 python -m venv .venv
@@ -122,6 +124,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
+- [Apple Silicon](docs/APPLE_SILICON.md) — MPS and optional MLX backends
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
 - [Machine-readable summary](results/phase1-summary.json)

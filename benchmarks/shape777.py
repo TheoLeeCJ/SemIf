@@ -32,7 +32,7 @@ def main() -> None:
         groups[row["group_id"]].append(row)
     if len(rows) != 777 or len(groups) != 37 or any(len(group) != 21 for group in groups.values()):
         parser.error("Expected the committed 37-state x 21-question fixture")
-    model, tokenizer, metadata = load_causal_model(args.model, args.revision)
+    model, tokenizer, metadata = load_causal_model(args.model, args.revision, "cuda")
     import torch
 
     first = next(iter(groups.values()))

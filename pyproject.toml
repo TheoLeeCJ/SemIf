@@ -26,6 +26,7 @@ openjev-score = "openjev_phase1.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+mlx = ["mlx==0.32.2", "mlx-lm==0.31.3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

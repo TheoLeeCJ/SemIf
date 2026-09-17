@@ -8,7 +8,7 @@ import inspect
 import json
 import time
 
-from .core import direct_messages, softmax
+from .core import direct_messages, softmax, synchronize
 from .direct import PROMPT_VERSION, encode_prompt
 
 
@@ -62,7 +62,7 @@ class SerialPrefixScorer:
         prefix = self.prefix if hit else _state_prefix(self.tokenizer, row["state"])
         if not prefix or ids[: len(prefix)] != prefix or len(ids) <= len(prefix):
             raise ValueError("State prefix does not match the full prompt")
-        sync = lambda: torch.cuda.synchronize(self.device) if self.device.type == "cuda" else None
+        sync = lambda: synchronize(self.device)
         prefill_seconds = 0.0
         self.model.eval()
         with torch.inference_mode():

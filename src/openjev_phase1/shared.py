@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import inspect
 import json
 import time
 
-from .core import direct_messages, softmax
+from .core import direct_messages, softmax, synchronize
 from .direct import PROMPT_VERSION, encode_prompt
 
 
@@ -70,7 +71,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     selected_positions = sorted(set(ends))
     encode_seconds = time.perf_counter() - started
     device = next(model.parameters()).device
-    sync = lambda: torch.cuda.synchronize(device) if device.type == "cuda" else None
+    sync = lambda: synchronize(device)
     parameters = inspect.signature(model.forward).parameters
     if "logits_to_keep" not in parameters and hasattr(model, "get_base_model"):
         parameters = inspect.signature(model.get_base_model().forward).parameters
@@ -95,26 +96,55 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
             raise RuntimeError("Invalid native prefix cache")
         if not callable(getattr(cache, "reorder_cache", None)):
             raise RuntimeError("Native cache does not support duplicate branch selection")
-        sync()
-        mark = time.perf_counter()
-        cache.reorder_cache(torch.zeros(len(rows), dtype=torch.long, device=device))
-        sync()
-        replicate_seconds = time.perf_counter() - mark
-        inputs = {key: torch.tensor(value, dtype=torch.long, device=device) for key, value in layout.items()}
-        sync()
-        mark = time.perf_counter()
-        output = model(
-            **inputs,
-            past_key_values=cache,
-            use_cache=True,
-            return_dict=True,
-            logits_to_keep=torch.tensor(selected_positions, dtype=torch.long, device=device),
-        )
-        sync()
-        suffix_seconds = time.perf_counter() - mark
+        # MPS is faster with independent batch-1 suffixes; CUDA stays batched.
+        looped = device.type == "mps"
+        replicate_seconds = 0.0
+        suffix_seconds = 0.0
+        vocabularies = []
+        if looped:
+            for ids, _, _ in encoded:
+                suffix = ids[len(prefix) :]
+                sync()
+                mark = time.perf_counter()
+                # Branch caches are already independent rows; no reorder needed.
+                branch = copy.deepcopy(cache)
+                sync()
+                replicate_seconds += time.perf_counter() - mark
+                mark = time.perf_counter()
+                output = model(
+                    input_ids=torch.tensor([suffix], dtype=torch.long, device=device),
+                    attention_mask=torch.ones((1, len(ids)), dtype=torch.long, device=device),
+                    past_key_values=branch,
+                    use_cache=True,
+                    return_dict=True,
+                    logits_to_keep=1,
+                )
+                sync()
+                suffix_seconds += time.perf_counter() - mark
+                vocabularies.append(output.logits[0, -1, :].float())
+                del output, branch
+        else:
+            mark = time.perf_counter()
+            cache.reorder_cache(torch.zeros(len(rows), dtype=torch.long, device=device))
+            inputs = {key: torch.tensor(value, dtype=torch.long, device=device) for key, value in layout.items()}
+            sync()
+            replicate_seconds = time.perf_counter() - mark
+            mark = time.perf_counter()
+            output = model(
+                **inputs,
+                past_key_values=cache,
+                use_cache=True,
+                return_dict=True,
+                logits_to_keep=torch.tensor(selected_positions, dtype=torch.long, device=device),
+            )
+            sync()
+            suffix_seconds = time.perf_counter() - mark
+            vocabularies = [
+                output.logits[index, selected_positions.index(ends[index]), :].float() for index in range(len(rows))
+            ]
         results = []
         for index, (row, (ids, slots, prompt_hash)) in enumerate(zip(rows, encoded)):
-            vocabulary = output.logits[index, selected_positions.index(ends[index]), :].float()
+            vocabulary = vocabularies[index]
             selected = vocabulary[slots].cpu().tolist()
             results.append(
                 {
@@ -125,12 +155,16 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                     "input_tokens": len(ids),
                     "prompt_sha256": prompt_hash,
                     "prompt_version": PROMPT_VERSION,
-                    "model": {**metadata, "serving_config": "native-state-prefix-parallel-v1"},
+                    "model": {**metadata, "serving_config": (
+                        "native-state-prefix-looped-v1" if looped else "native-state-prefix-parallel-v1"
+                    )},
                     "readout": "native selected suffix-position logits",
                     "probability_status": "conditional option score; uncalibrated as decision confidence",
                 }
             )
-        del output, cache
+        if not looped:
+            del output
+        del cache
     sync()
     timing = {
         "total_seconds": time.perf_counter() - started,
@@ -141,6 +175,11 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         "suffix_forward_seconds": suffix_seconds,
         "batch_size": len(rows),
         "true_suffix_tokens": sum(len(ids) - len(prefix) for ids, _, _ in encoded),
-        "padded_suffix_tokens": len(rows) * len(layout["input_ids"][0]),
+        # Looped mode forwards unpadded single rows, so no padding exists there.
+        "padded_suffix_tokens": (
+            sum(len(ids) - len(prefix) for ids, _, _ in encoded)
+            if looped
+            else len(rows) * len(layout["input_ids"][0])
+        ),
     }
     return results, timing

@@ -122,7 +122,7 @@ def main() -> None:
     if len(rows) != 21 or len({row["state"] for row in rows}) != 1:
         parser.error("Input must begin with one complete 21-question shared-state group")
 
-    model, tokenizer, metadata = load_causal_model(args.model, args.revision)
+    model, tokenizer, metadata = load_causal_model(args.model, args.revision, "cuda")
     import torch
 
     # Warm both paths; warmup is excluded from every reported duration.
