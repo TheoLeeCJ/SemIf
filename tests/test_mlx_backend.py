@@ -9,11 +9,11 @@ def test_last_logits_uses_language_model(tied):
     from openjev_phase1.mlx_backend import _last_logits
 
     hidden = mx.arange(24).reshape(1, 3, 8).astype(mx.float32)
-    cache = [object()]
+    expected_cache = [object()]
 
     class TextModel:
         def __call__(self, ids, cache=None):
-            assert cache is cache
+            assert cache is expected_cache
             return hidden
 
     def project(last):
@@ -30,7 +30,7 @@ def test_last_logits_uses_language_model(tied):
         model=text, args=SimpleNamespace(tie_word_embeddings=tied),
         lm_head=wrong_projection if tied else project,
     ))
-    logits = _last_logits(model, mx.array([[1, 2, 3]]), cache)
+    logits = _last_logits(model, mx.array([[1, 2, 3]]), expected_cache)
     assert logits.tolist() == (hidden[:, -1, :] * 2).tolist()
 
 
@@ -78,14 +78,11 @@ def test_loader_rejects_unpinned_revision():
     {"model_type": "qwen3_5", "model_file": "custom.py"},
     {"model_type": "qwen3_5", "quantization": {"bits": 4}},
 ])
-def test_loader_rejects_unsupported_checkpoint(tmp_path, config):
-    import json
+def test_rejects_unsupported_checkpoint(config):
+    from openjev_phase1.mlx_backend import _reject_unsupported_checkpoint
 
-    from openjev_phase1.mlx_backend import load_causal_model
-
-    (tmp_path / "config.json").write_text(json.dumps(config))
     with pytest.raises(ValueError):
-        load_causal_model(str(tmp_path), "local-manifest")
+        _reject_unsupported_checkpoint(config)
 
 
 def test_shared_rejects_mixed_states():
