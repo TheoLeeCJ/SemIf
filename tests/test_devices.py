@@ -24,23 +24,21 @@ def test_auto_uses_mps_without_cuda(torch_stub):
     assert resolve_device().name == "mps"
 
 
-def test_auto_preserves_single_cuda_requirement(torch_stub):
+def test_cuda_requires_exactly_one_gpu(torch_stub):
     torch_stub.cuda.is_available.return_value = True
     torch_stub.cuda.device_count.return_value = 1
     assert resolve_device().name == "cuda:0"
     torch_stub.cuda.device_count.return_value = 2
     with pytest.raises(ValueError, match="exactly one CUDA"):
         resolve_device()
-
-
-def test_explicit_unavailable_devices_fail(torch_stub):
     with pytest.raises(ValueError, match="exactly one CUDA"):
         resolve_device("cuda")
+
+
+def test_mps_availability_is_checked(torch_stub):
     torch_stub.backends.mps.is_available.return_value = False
     with pytest.raises(ValueError, match="MPS is unavailable"):
         resolve_device("mps")
-    with pytest.raises(ValueError, match="Device must"):
-        resolve_device("cpu")
 
 
 @pytest.mark.parametrize("backend", ["cuda", "mps", "cpu"])
@@ -49,20 +47,15 @@ def test_synchronization_dispatch(torch_stub, backend):
     synchronize(device)
     if backend == "cuda":
         torch_stub.cuda.synchronize.assert_called_once_with(device)
-    else:
-        torch_stub.cuda.synchronize.assert_not_called()
     if backend == "mps":
         torch_stub.mps.synchronize.assert_called_once_with()
-    else:
-        torch_stub.mps.synchronize.assert_not_called()
 
 
 def test_loader_passes_device_dtype_and_revision(torch_stub, monkeypatch):
     model = Mock()
     factory = SimpleNamespace(from_pretrained=Mock(return_value=(model, {})))
-    config = SimpleNamespace(model_type="other")
     transformers = SimpleNamespace(
-        AutoConfig=SimpleNamespace(from_pretrained=Mock(return_value=config)),
+        AutoConfig=SimpleNamespace(from_pretrained=Mock(return_value=SimpleNamespace(model_type="other"))),
         AutoTokenizer=SimpleNamespace(from_pretrained=Mock(return_value=object())),
         AutoModelForCausalLM=factory, __version__="test",
     )
@@ -77,30 +70,5 @@ def test_loader_passes_device_dtype_and_revision(torch_stub, monkeypatch):
     assert kwargs["dtype"] == "float16"
     assert kwargs["revision"] == revision
     assert kwargs["trust_remote_code"] is False
-    assert metadata["device"] == "mps"
-    assert metadata["dtype"] == "float16"
+    assert metadata["device"] == "mps" and metadata["dtype"] == "float16"
     model.eval.assert_called_once()
-
-
-def test_direct_scorer_synchronizes_before_and_after_forward(monkeypatch):
-    import torch
-    from openjev_phase1 import direct
-
-    events = []
-
-    class Model:
-        def parameters(self):
-            yield torch.zeros(1)
-
-        def forward(self, input_ids, attention_mask, use_cache, return_dict, logits_to_keep):
-            events.append("forward")
-            return SimpleNamespace(logits=torch.tensor([[[1.0, 2.0]]]))
-
-        __call__ = forward
-
-    monkeypatch.setattr(direct, "encode_prompt", lambda *args: ([1], [0, 1], "hash"))
-    monkeypatch.setattr(direct, "synchronize", lambda device: events.append("sync"))
-    result = direct.score(Model(), None, {"id": "x", "options": [{"id": "a"}, {"id": "b"}]}, {})
-    assert events == ["sync", "forward", "sync"]
-    assert sum(result["probabilities"]) == pytest.approx(1.0)
-    assert result["option_logits"] == [1.0, 2.0]

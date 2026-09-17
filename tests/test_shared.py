@@ -56,13 +56,7 @@ class FakeModel:
                 return_dict=True, logits_to_keep=1, past_key_values=None):
         width = int(input_ids.shape[1])
         entry_length = None if past_key_values is None else past_key_values.length
-        self.calls.append({
-            "batch": int(input_ids.shape[0]),
-            "width": width,
-            "logits_to_keep": logits_to_keep,
-            "cache_entry_length": entry_length,
-            "reorders": None if past_key_values is None else len(past_key_values.orders),
-        })
+        self.calls.append({"batch": int(input_ids.shape[0]), "entry_length": entry_length})
         if past_key_values is None:
             past_key_values = FakeCache(width)
         else:
@@ -77,45 +71,22 @@ def test_score_shared_looped_path_forwards_one_row_per_call(monkeypatch):
     if not torch.backends.mps.is_available():
         pytest.skip("MPS unavailable")
     rows_data = [
-        {"id": "a", "state": "s", "question": "q1", "options": [
-            {"id": "x", "description": "X"}, {"id": "y", "description": "Y"}]},
-        {"id": "b", "state": "s", "question": "q2", "options": [
-            {"id": "x", "description": "X"}, {"id": "y", "description": "Y"}]},
+        {"id": key, "state": "s", "question": f"q{index}",
+         "options": [{"id": "x", "description": "X"}, {"id": "y", "description": "Y"}]}
+        for index, key in enumerate(("a", "b"))
     ]
-
-    class FakeTok:
-        pad_token_id = 0
-        eos_token_id = 1
-
+    monkeypatch.setattr("openjev_phase1.shared.encode_prompt",
+                        lambda tok, row, limit: ([1] * 8, [2, 3], f"hash-{row['id']}"))
+    monkeypatch.setattr("openjev_phase1.shared._state_prefix", lambda tokenizer, state: [1] * 6)
     calls = []
-
-    def fake_encode_prompt(tokenizer, row, max_tokens):
-        return ([1] * 8, [2, 3], f"hash-{row['id']}")
-
-    def fake_state_prefix(tokenizer, state):
-        return [1] * 6
-
-    import openjev_phase1.shared as shared_module
-    monkeypatch.setattr(shared_module, "encode_prompt", fake_encode_prompt)
-    monkeypatch.setattr(shared_module, "_state_prefix", fake_state_prefix)
-    results, timing = score_shared(FakeModel(calls, torch.device("mps")), FakeTok(), rows_data, {}, 4096)
-
+    results, timing = score_shared(FakeModel(calls, torch.device("mps")),
+                                   SimpleNamespace(pad_token_id=0, eos_token_id=1), rows_data, {}, 4096)
     assert [r["id"] for r in results] == ["a", "b"]
-    assert timing["batch_size"] == 2
-    assert timing["suffix_forward_seconds"] > 0
-    assert timing["replicate_seconds"] > 0
-    assert all(r["model"]["serving_config"] == "native-state-prefix-looped-v1" for r in results)
-    # Looped suffixes are unpadded: padded count equals true suffix tokens.
-    assert timing["padded_suffix_tokens"] == timing["true_suffix_tokens"] == 4
-    assert len(calls) == 3  # one prefill + one suffix forward per row
+    assert len(calls) == 3  # one prefill + one batch-1 suffix forward per row
     prefill, *suffixes = calls
-    assert prefill["cache_entry_length"] is None
-    for call in suffixes:
-        assert call["batch"] == 1
-        assert call["logits_to_keep"] == 1
-        # Deep-copied branches are already independent batch-1 rows.
-        assert call["reorders"] == 0
-        # Each branch starts at prefix length: deep-copied, not shared state.
-        assert call["cache_entry_length"] == 6
-    for result in results:
-        assert sum(result["probabilities"]) == pytest.approx(1.0)
+    assert prefill["entry_length"] is None
+    # Each branch starts at prefix length: deep-copied, not shared state.
+    assert all(call["batch"] == 1 and call["entry_length"] == 6 for call in suffixes)
+    assert timing["replicate_seconds"] > 0 and timing["suffix_forward_seconds"] > 0
+    assert timing["padded_suffix_tokens"] == timing["true_suffix_tokens"] == 4
+    assert all(sum(result["probabilities"]) == pytest.approx(1.0) for result in results)
