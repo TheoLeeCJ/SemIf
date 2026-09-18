@@ -2,10 +2,12 @@
 
 The repository includes the exact owned speed fixture, benchmark runners, row-level model outputs, and source-selection IDs. Model weights and third-party records without a redistribution grant remain upstream.
 
+Device selection is automatic: CUDA when exactly one GPU is visible, otherwise Apple Metal (MPS) when available, otherwise CPU. On NVIDIA hosts prefix GPU commands with `CUDA_VISIBLE_DEVICES=0`; on Apple Silicon run the same commands without it. Every runner also accepts `--device auto|cuda|mps|cpu` and `--dtype auto|bfloat16|float16|float32` (auto prefers bfloat16 with float16/float32 fallback off CUDA). Published timings used one RTX 3090 with BF16; MPS/CPU runs are functionally equivalent but not timing-comparable, and MPS may record a fallback dtype in `model.dtype`.
+
 ## Compact generation comparison
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python benchmarks/decision_vs_generation.py \
+python benchmarks/decision_vs_generation.py \
   --model Qwen/Qwen3.5-4B \
   --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
   --input benchmarks/data/shape777.jsonl \
@@ -30,17 +32,18 @@ python benchmarks/build_perturbations.py \
 ## Full 37×21 systems benchmark
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python benchmarks/shape777.py \
+python benchmarks/shape777.py \
   --model Qwen/Qwen3.5-4B \
   --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
   --input benchmarks/data/shape777.jsonl \
   --output shape777-run.json
 ```
+(On NVIDIA hosts, prefix with `CUDA_VISIBLE_DEVICES=0`.)
 
 This covers fresh scoring, serial prefix-cache reuse, and parallel shared-state scoring. Reproduce the native reranker measurements separately:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python benchmarks/shape777_reranker.py \
+python benchmarks/shape777_reranker.py \
   --model Qwen/Qwen3-Reranker-4B \
   --revision 22e683669bc0f0bd69640a1354a6d0aebcfeede5 \
   --input benchmarks/data/shape777.jsonl \
@@ -115,15 +118,17 @@ Regenerate the row-level predictions with the published scorer paths. The commit
 score_set () {
   input=$1
   stem=$2
-  CUDA_VISIBLE_DEVICES=0 semif-score --mode serial \
+  semif-score --mode serial \
     --model Qwen/Qwen3.5-4B \
     --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
     --input "$input" --output "direct-$stem.jsonl"
-  CUDA_VISIBLE_DEVICES=0 semif-score --mode reranker \
+  semif-score --mode reranker \
     --model Qwen/Qwen3-Reranker-4B \
     --revision 22e683669bc0f0bd69640a1354a6d0aebcfeede5 \
     --input "$input" --output "reranker-$stem.jsonl"
 }
+# On NVIDIA hosts, prefix the semif-score lines with CUDA_VISIBLE_DEVICES=0.
+# Use --device mps|cpu and --dtype float16|float32 to override the automatic choice.
 
 score_set benchmarks/data/authored144.jsonl authored144
 score_set "$OUT/wanli256.jsonl" wanli256

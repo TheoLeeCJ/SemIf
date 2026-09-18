@@ -21,6 +21,18 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "mps", "cpu"),
+        default="auto",
+        help="Accelerator to use; auto selects CUDA, then Apple Metal (MPS), then CPU.",
+    )
+    parser.add_argument(
+        "--dtype",
+        choices=("auto", "bfloat16", "float16", "float32"),
+        default="auto",
+        help="Model dtype; auto prefers bfloat16 with float16/float32 fallback off CUDA.",
+    )
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -29,7 +41,12 @@ def main() -> None:
         parser.error("Input is empty")
     for row in rows:
         validate_row(row)
-    model, tokenizer, metadata = load_causal_model(args.model, args.revision)
+    model, tokenizer, metadata = load_causal_model(
+        args.model,
+        args.revision,
+        device=None if args.device == "auto" else args.device,
+        dtype=None if args.dtype == "auto" else args.dtype,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x") as destination:
         if args.mode == "shared":

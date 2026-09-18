@@ -6,7 +6,7 @@ import inspect
 import json
 import time
 
-from .core import direct_messages, softmax
+from .core import direct_messages, softmax, synchronize
 from .direct import PROMPT_VERSION, encode_prompt
 
 
@@ -70,7 +70,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     selected_positions = sorted(set(ends))
     encode_seconds = time.perf_counter() - started
     device = next(model.parameters()).device
-    sync = lambda: torch.cuda.synchronize(device) if device.type == "cuda" else None
+    sync = lambda: synchronize(device)
     parameters = inspect.signature(model.forward).parameters
     if "logits_to_keep" not in parameters and hasattr(model, "get_base_model"):
         parameters = inspect.signature(model.get_base_model().forward).parameters

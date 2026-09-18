@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import time
 
-from .core import digest, softmax, validate_row
+from .core import digest, softmax, synchronize, validate_row
 
 PREFIX = (
     '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the '
@@ -70,13 +70,11 @@ def score_pair_batch(model, tokenizer, specs, max_tokens: int = 4096):
     if "logits_to_keep" in inspect.signature(model.forward).parameters:
         kwargs["logits_to_keep"] = 1
     no_id, yes_id = _answer_ids(tokenizer)
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    synchronize(device)
     mark = time.perf_counter()
     with torch.inference_mode():
         logits = model(**kwargs).logits[:, -1, :].float()
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    synchronize(device)
     elapsed = time.perf_counter() - mark
     selected = logits[:, [no_id, yes_id]]
     odds = selected[:, 1] - selected[:, 0]
