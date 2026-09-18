@@ -14,6 +14,8 @@ No model weights or third-party raw evaluation records are distributed here.
 | Material Symbols | https://fonts.google.com/icons | Google Fonts CDN | Browser demo icons; Apache-2.0. |
 | MLC Qwen3-0.6B build | https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_1-MLC | Catalog entry from WebLLM `0.2.85` | Quantized browser model; upstream terms apply. |
 | MLC Qwen3.5-0.8B build | https://huggingface.co/mlc-ai/Qwen3.5-0.8B-q4f16_1-MLC | Catalog entry from WebLLM `0.2.85` | Quantized browser model; upstream terms apply. |
+| Qwen3.8-27B exl3 quant | https://huggingface.co/turboderp/Qwen3.8-27B-exl3 | `a35e75a73baee51da709329d19294245cbeeb5d8` (5.00bpw) | Probe checkpoint for `exl3-bridge/`; upstream (turboderp) terms and Qwen base-model license apply. |
+| exllamav3 | https://github.com/turboderp-org/exllamav3 | `1.4.4+cu128.torch2.10.0` | Bridge runtime (`exl3-bridge/`); MIT. |
 
 These URLs returned HTTP 200 on 2026-09-16. `benchmarks/fetch_sources.py` refuses content whose SHA-256 differs from the evaluated snapshot.
 
