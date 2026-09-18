@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import time
 
-from .core import LETTERS, digest, direct_messages, softmax
+from .core import LETTERS, digest, direct_messages, softmax, synchronize
 
 PROMPT_VERSION = "direct-options-v1"
 
@@ -55,13 +55,11 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
         "input_ids": torch.tensor([ids], dtype=torch.long, device=device),
         "attention_mask": torch.ones((1, len(ids)), dtype=torch.long, device=device),
     }
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    synchronize(device)
     forward_start = time.perf_counter()
     with torch.inference_mode():
         vocabulary = _forward(model, inputs)[0].float()
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+    synchronize(device)
     selected = vocabulary[slots].cpu().tolist()
     return {
         "id": row["id"],

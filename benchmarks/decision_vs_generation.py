@@ -9,7 +9,13 @@ import statistics
 import time
 from pathlib import Path
 
-from openjev_phase1.core import load_causal_model
+from openjev_phase1.core import (
+    describe_hardware,
+    load_causal_model,
+    peak_memory_bytes,
+    reset_peak_memory_stats,
+    synchronize,
+)
 from openjev_phase1.shared import score_shared
 
 
@@ -78,8 +84,7 @@ def run_generation(model, tokenizer, state: str, rows: list[dict], max_new_token
             streamer=streamer,
             use_cache=True,
         )
-    if next(model.parameters()).device.type == "cuda":
-        torch.cuda.synchronize()
+    synchronize(next(model.parameters()).device)
     total = time.perf_counter() - started
     generated = output[0, input_tokens:].detach().cpu().tolist()
     text = tokenizer.decode(generated, skip_special_tokens=True)
@@ -115,6 +120,18 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cuda", "mps", "cpu"),
+        default="auto",
+        help="Accelerator to use; auto selects CUDA, then Apple Metal (MPS), then CPU.",
+    )
+    parser.add_argument(
+        "--dtype",
+        choices=("auto", "bfloat16", "float16", "float32"),
+        default="auto",
+        help="Model dtype; auto prefers bfloat16 with fallback off CUDA.",
+    )
     args = parser.parse_args()
     if args.output.exists() or args.repeats < 1 or args.max_new_tokens < 1:
         parser.error("Output must be new and numeric limits must be positive")
@@ -122,8 +139,13 @@ def main() -> None:
     if len(rows) != 21 or len({row["state"] for row in rows}) != 1:
         parser.error("Input must begin with one complete 21-question shared-state group")
 
-    model, tokenizer, metadata = load_causal_model(args.model, args.revision)
-    import torch
+    model, tokenizer, metadata = load_causal_model(
+        args.model,
+        args.revision,
+        device=None if args.device == "auto" else args.device,
+        dtype=None if args.dtype == "auto" else args.dtype,
+    )
+    device = next(model.parameters()).device
 
     # Warm both paths; warmup is excluded from every reported duration.
     score_shared(model, tokenizer, rows, metadata)
@@ -134,15 +156,24 @@ def main() -> None:
     direct_runs = []
     direct_outputs = None
     for _ in range(args.repeats):
-        torch.cuda.reset_peak_memory_stats()
+        reset_peak_memory_stats(device)
         direct_outputs, timing = score_shared(model, tokenizer, rows, metadata)
-        direct_runs.append({**timing, "peak_cuda_bytes": torch.cuda.max_memory_allocated()})
+        peak = peak_memory_bytes(device)
+        direct_runs.append(
+            {
+                **timing,
+                "peak_cuda_bytes": peak if device.type == "cuda" else None,
+                "peak_memory_bytes": peak,
+            }
+        )
 
     generation_runs = []
     for _ in range(args.repeats):
-        torch.cuda.reset_peak_memory_stats()
+        reset_peak_memory_stats(device)
         run = run_generation(model, tokenizer, rows[0]["state"], rows, args.max_new_tokens)
-        run["peak_cuda_bytes"] = torch.cuda.max_memory_allocated()
+        peak = peak_memory_bytes(device)
+        run["peak_cuda_bytes"] = peak if device.type == "cuda" else None
+        run["peak_memory_bytes"] = peak
         generation_runs.append(run)
 
     direct_choices = [
@@ -156,7 +187,8 @@ def main() -> None:
     report = {
         "version": "decision-vs-compact-generation-v2",
         "model": metadata,
-        "hardware": torch.cuda.get_device_name(0),
+        "hardware": describe_hardware(),
+        "device": device.type,
         "input": {
             "path": str(args.input),
             "sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
