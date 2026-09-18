@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openjev-phase1"
+name = "semif-phase1"
 version = "0.1.0"
 description = "Open baselines for runtime-defined semantic decisions"
 readme = "README.md"
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-openjev-score = "openjev_phase1.cli:main"
+semif-score = "semif_phase1.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]

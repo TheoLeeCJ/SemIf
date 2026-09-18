@@ -5,17 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
     <meta name="description" content="Run typed option logits and autoregressive JSON locally with open models and WebGPU." />
-    <title>OpenJev in your browser</title>
+    <title>SemIf (formerly OpenJev) — local decisions in your browser</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,600,0,0&amp;icon_names=add,celebration,check,check_circle,download,error,hourglass_top,memory,play_arrow,progress_activity,refresh,remove,replay&amp;display=block" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main class="page">
+      <aside class="research-notice" role="note"><strong>Independent research project.</strong> Formerly called OpenJev. Not affiliated with or endorsed by TypeSafe. No infringement is intended.</aside>
       <header class="mast">
-        <a class="brand" href="./">openjev</a>
-        <div class="mast-right">
-          <span class="tagline">Can we run something like Jev in your browser?</span>
-          <a class="repo-link" href="https://github.com/TheoLeeCJ/openjev">GitHub repo ↗</a>
+        <a class="brand" href="./">SemIf (formerly OpenJev)</a>
+        <div class="mast-actions">
+          <span class="tagline">Semantic ifs from open models, in your browser.</span>
+          <label class="ui-toggle" for="ui-mode">
+            <input id="ui-mode" type="checkbox" role="switch" />
+            <span class="ui-toggle-track" aria-hidden="true"><i></i></span>
+            <b>Unsloppify site</b>
+          </label>
         </div>
       </header>
 
@@ -48,7 +53,7 @@
         </div>
         <p id="model-notice" class="model-notice" role="note">Larger model. Loading may be slower or may not fit on some low-end devices.</p>
         <div class="quality-card" aria-labelledby="quality-title">
-          <div class="quality-heading"><strong id="quality-title">Model performance</strong><span>higher is better</span></div>
+          <div class="quality-heading"><strong id="quality-title">Measured model quality</strong><span>native checkpoints · owned + public benchmarks</span></div>
           <div class="quality-scroll">
             <table>
               <thead><tr><th>Model</th><th>Download</th><th>Authored</th><th>Perturbed</th><th>TypeSafe</th></tr></thead>
@@ -60,7 +65,7 @@
               </tbody>
             </table>
           </div>
-          <p>Native BF16 · TypeSafe: same 102-row subset · Jev: published result · browser builds are quantized</p>
+          <p>Owned columns are balanced accuracy. TypeSafe is equal-case agreement on the same 102-row public subset; Jev is the published value. Browser quantization may change model accuracy.</p>
         </div>
         <div id="support"><p :class="['support', kind]" role="status"><span class="material-symbols-rounded" aria-hidden="true">{{ icon }}</span>{{ text }}</p></div>
         <div class="phases" aria-label="Model setup phases">
@@ -153,7 +158,7 @@
         </div>
       </details>
 
-      <footer><span>OpenJev / browser lab</span><span><a href="https://github.com/TheoLeeCJ/openjev">GitHub repo</a> · <a id="model-link" href="https://huggingface.co/openbmb/MiniCPM5-2B-GGUF">model</a> · <a href="https://github.com/ngxson/wllama">wllama</a></span></footer>
+      <footer><span>SemIf / browser lab</span><span><a href="README.md">implementation notes</a> · <a id="model-link" href="https://huggingface.co/openbmb/MiniCPM5-2B-GGUF">model</a> · <a href="https://github.com/ngxson/wllama">wllama</a></span></footer>
     </main>
     <script type="module" src="app.js"></script>
   </body>

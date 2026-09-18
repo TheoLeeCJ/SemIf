@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Measured replay: typed decision logits versus autoregressive JSON on one RTX 3090." />
-    <title>OpenJev — decisions versus generated tokens</title>
+    <title>SemIf — decisions versus generated tokens</title>
     <style>
       :root { --ink:#171715; --paper:#f7f6f0; --soft:#dfded7; --lime:#d4ff3f; --pink:#ee5ba6; }
       * { box-sizing:border-box; }
@@ -66,8 +66,8 @@
   <body>
     <main class="page">
       <header class="mast">
-        <div class="brand">openjev</div>
-        <div class="tagline">Can we run something like Jev on a 3090 at home?</div>
+        <div class="brand">SemIf</div>
+        <div class="tagline">Semantic ifs from open models, on a 3090 at home.</div>
       </header>
 
       <div class="brief">Same frozen 4B model. Same state. Same 21 questions. <span>separate measured runs · aligned at t=0</span></div>
@@ -76,7 +76,7 @@
       <section class="race" aria-label="Measured replay of direct typed decisions and autoregressive JSON generation">
         <article class="terminal typed" id="typed" data-name="direct option logits">
           <div class="terminal-head"><span>21 DISTRIBUTIONS</span><span>0 OUTPUT TOKENS</span></div>
-          <div class="command">$ openjev-score --mode shared …<br /><b id="typed-status">reading shared state…</b></div>
+          <div class="command">$ semif-score --mode shared …<br /><b id="typed-status">reading shared state…</b></div>
           <pre id="typed-output"></pre>
           <div class="stats"><span>median 1.023s · 3 runs</span><span>21 typed probability pairs</span></div>
         </article>
@@ -101,7 +101,7 @@
         <p class="note">Median of three warmed, sequentially measured runs on one RTX 3090 with the same frozen BF16 Qwen3.5-4B and one owned 21-criterion state. The generative prompt requests only an ordered yes/no array—no keys, confidence objects, or explanation. Commands are abbreviated; complete commands and raw token timelines are linked from the repository. The replay aligns both paths at t=0 and preserves their measured completion ratio.</p>
       </div>
 
-      <footer class="footer"><span>OpenJev / measured local replay</span><a href="../docs/RESULTS.md">methods, quality &amp; limits ↗</a></footer>
+      <footer class="footer"><span>SemIf / measured local replay</span><a href="../docs/RESULTS.md">methods, quality &amp; limits ↗</a></footer>
     </main>
 
     <script>

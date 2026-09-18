@@ -9,14 +9,14 @@ import statistics
 import time
 from pathlib import Path
 
-from openjev_phase1.core import (
+from semif_phase1.core import (
     describe_hardware,
     load_causal_model,
     peak_memory_bytes,
     reset_peak_memory_stats,
     synchronize,
 )
-from openjev_phase1.shared import score_shared
+from semif_phase1.shared import score_shared
 
 
 class TimelineStreamer:

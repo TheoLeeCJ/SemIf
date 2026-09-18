@@ -41,9 +41,7 @@ def test_three_pinned_model_tiers():
     assert "may not fit on some low-end devices" in text["app.js"]
     assert 'id="model-notice"' in text["index.html"]
     assert 'id="quality-title"' in text["index.html"]
-    assert "Model performance" in text["index.html"]
-    assert text["index.html"].count("https://github.com/TheoLeeCJ/openjev") == 2
-    assert "higher is better" in text["index.html"]
+    assert 'owned + public benchmarks' in text["index.html"]
     assert "Published Jev" in text["index.html"]
     for score in ("44.0%", "52.8%", "40.7%", "68.6%", "69.3%", "63.7%", "81.3%", "76.6%", "84.5%", "88.3%"):
         assert score in text["index.html"]
@@ -68,3 +66,16 @@ def test_live_comparison_and_limits():
         assert phrase in combined.lower()
     assert "WebSocket" not in combined
     assert not re.search(r"/api/(?:generate|score)", combined)
+
+def test_identity_notice_and_ui_mode_switch():
+    text = sources()
+    assert ">SemIf (formerly OpenJev)<" in text["index.html"]
+    assert "Independent research project" in text["index.html"]
+    assert "Not affiliated with or endorsed by TypeSafe" in text["index.html"]
+    assert "Formerly called OpenJev" in text["index.html"]
+    assert "No infringement is intended" in text["index.html"]
+    assert 'id="ui-mode"' in text["index.html"]
+    assert "Unsloppify site" in text["index.html"]
+    assert 'document.body.classList.toggle("plain-ui", plain)' in text["app.js"]
+    assert "semif-ui-mode" in text["app.js"]
+    assert "body.plain-ui" in (WEBGPU / "style.css").read_text()

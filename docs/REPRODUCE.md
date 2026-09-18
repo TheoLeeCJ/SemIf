@@ -20,17 +20,17 @@ Use one GPU per scorer process. The measured environment was Ubuntu 22.04 on Lin
 ## Score owned examples
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 openjev-score --mode direct \
+CUDA_VISIBLE_DEVICES=0 semif-score --mode direct \
   --model Qwen/Qwen3.5-4B \
   --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
   --input examples/decisions.jsonl --output results-direct.jsonl
 
-CUDA_VISIBLE_DEVICES=0 openjev-score --mode serial \
+CUDA_VISIBLE_DEVICES=0 semif-score --mode serial \
   --model Qwen/Qwen3.5-4B \
   --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
   --input examples/decisions.jsonl --output results-serial.jsonl
 
-CUDA_VISIBLE_DEVICES=0 openjev-score --mode reranker \
+CUDA_VISIBLE_DEVICES=0 semif-score --mode reranker \
   --model Qwen/Qwen3-Reranker-4B \
   --revision 22e683669bc0f0bd69640a1354a6d0aebcfeede5 \
   --input examples/decisions.jsonl --output results-reranker.jsonl
@@ -40,15 +40,15 @@ The command refuses an existing output path and refuses silent input truncation.
 
 ## Third-party evaluations
 
-Raw TypeSafe records are deliberately absent because no explicit redistribution grant was located. Fetch the exact evaluated snapshots, with hash verification:
+TypeSafe source records are not included. To reproduce that comparison, supply local snapshots in the source directory. The helper fetches the remaining public evaluation inputs with hash verification:
 
 ```bash
-python benchmarks/fetch_sources.py --output /path/on/large-drive/openjev-sources
+python benchmarks/fetch_sources.py --output /path/on/large-drive/semif-sources
 ```
 
 The frozen 706-row matrix and source IDs are in `benchmarks/manifests/`. Row-level direct and reranker outputs are in `results/raw/predictions/`. The complete owned 144-row labeled workload is distributed in `benchmarks/data/authored144.jsonl`.
 
-Build the exact external evaluation rows and recompute their metrics with the commands in [the benchmark guide](../benchmarks/README.md#quality-evidence). The builders consume only hash-verified downloads and frozen selection IDs; the TypeSafe and Every evaluators accept the rebuilt gold rows plus the committed row-level predictions.
+Build the exact external evaluation rows and recompute their metrics with the commands in [the benchmark guide](../benchmarks/README.md#quality-evidence). The builders verify source hashes and frozen selection IDs; the TypeSafe and Every evaluators accept the rebuilt gold rows plus the committed row-level predictions.
 
 ## Reproduce perturbation evidence
 
@@ -62,7 +62,7 @@ python benchmarks/build_perturbations.py \
 cmp /tmp/perturbations108.jsonl benchmarks/data/perturbations108.jsonl
 ```
 
-Regenerate direct and reranker predictions with `openjev-score --mode serial` and `--mode reranker`, respectively, or recompute the exact committed report from the included row-level predictions:
+Regenerate direct and reranker predictions with `semif-score --mode serial` and `--mode reranker`, respectively, or recompute the exact committed report from the included row-level predictions:
 
 ```bash
 python benchmarks/evaluate_perturbations.py \

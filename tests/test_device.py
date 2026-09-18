@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from openjev_phase1 import core
+from semif_phase1 import core
 
 
 def _set_cuda(monkeypatch, available, count=1):

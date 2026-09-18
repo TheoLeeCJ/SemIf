@@ -1,5 +1,5 @@
 {
-  "schema": "openjev-phase1-summary-v1",
+  "schema": "semif-phase1-summary-v1",
   "date": "2026-09-16",
   "claim": "Direct option logits are the strongest tested open general-decision baseline; a native reranker remains a retrieval control and is not a drop-in universal decision operator.",
   "models": {

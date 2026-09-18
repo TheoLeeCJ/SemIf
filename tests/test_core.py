@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from openjev_phase1.core import direct_messages, softmax, validate_row
+from semif_phase1.core import direct_messages, softmax, validate_row
 
 
 ROW = {

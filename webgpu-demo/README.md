@@ -1,6 +1,4 @@
-# OpenJev browser lab
-
-[Try it on openjev.com](https://openjev.com)
+# SemIf browser lab
 
 This is a browser-only comparison of two readout paths through the same selected quantized local model:
 

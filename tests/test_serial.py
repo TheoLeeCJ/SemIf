@@ -1,4 +1,4 @@
-from openjev_phase1.serial import _state_prefix
+from semif_phase1.serial import _state_prefix
 
 
 class Tokenizer:

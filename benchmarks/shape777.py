@@ -10,15 +10,15 @@ import statistics
 import time
 from pathlib import Path
 
-from openjev_phase1.core import (
+from semif_phase1.core import (
     describe_hardware,
     load_causal_model,
     peak_memory_bytes,
     reset_peak_memory_stats,
 )
-from openjev_phase1.direct import score
-from openjev_phase1.serial import SerialPrefixScorer
-from openjev_phase1.shared import score_shared
+from semif_phase1.direct import score
+from semif_phase1.serial import SerialPrefixScorer
+from semif_phase1.shared import score_shared
 
 
 def main() -> None:

@@ -1,5 +1,5 @@
 {
-  "schema": "openjev-browser-model-ladder-v1",
+  "schema": "semif-browser-model-ladder-v1",
   "date": "2026-09-18",
   "quality_boundary": {
     "interface": "native BF16 exact final-position option logits; no generation",

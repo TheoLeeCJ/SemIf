@@ -1,24 +1,33 @@
-# OpenJev
+# SemIf (formerly OpenJev)
 
 <div align="center">
 
-**Can we run something like Jev on a 3090 at home?**
+**Semantic ifs from open models, on a 3090 at home.**
 
-**Wow! No waitlist.** [Run it in your browser today.](https://openjev.com)
+*Independent project; not affiliated with Jev or TypeSafe.*
 
-[![Measured replay: typed decisions appear together while JSON streams token by token](demo/assets/openjev-phase1-replay.gif)](demo/index.html)
+**Wow! No waitlist.** [Run it in your browser today.](webgpu-demo/index.html)
+
+[![Measured replay: typed decisions appear together while JSON streams token by token](demo/assets/semif-phase1-replay.gif)](demo/index.html)
 
 *Same frozen 4B model · same state · same 21 questions · measured separately, aligned at t=0 in the replay*
 
 </div>
 
-![Some AI company asks you to join a waitlist; OpenJev runs in your browser today](assets/openjev-no-waitlist.png)
+> **Independent research project.** SemIf was formerly called OpenJev. It is not affiliated with or endorsed by TypeSafe. Jev, TypeSafe, and other names and marks are the property of their respective owners. No infringement is intended.
+
+![Some AI company asks you to join a waitlist; SemIf runs in your browser today](assets/semif-no-waitlist.png)
 
 Most agent decisions are small: *route this*, *retry that*, *does the evidence support X?* A chat model can answer them, but it spends time generating text that software immediately parses back into an `if` statement.
 
 Jev is TypeSafe's closed service for runtime-defined semantic decisions. This project reproduces that **interface pattern** with open models; it does not reproduce Jev's undisclosed model or training.
 
 This baseline reads typed option probabilities directly from a model. No answer sentence, JSON repair, or decoding loop.
+
+### Latest changes — 2026-09-18
+
+- Added MiniCPM5 2B and Qwen3.5 4B to the browser demo.
+- Added **Unsloppify site**, a switch to a conventional interface.
 
 ## Quick start
 
@@ -34,7 +43,7 @@ pip install -e '.[test]'
 Run the owned examples:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 openjev-score \
+CUDA_VISIBLE_DEVICES=0 semif-score \
   --mode direct \
   --model Qwen/Qwen3.5-4B \
   --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
@@ -139,7 +148,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
 - [Interactive replay](demo/index.html)
-- [Browser-only WebGPU demo](https://openjev.com) — no waitlist; use it today
+- [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
 - [Machine-readable summary](results/phase1-summary.json)
 - [Benchmark bundle](benchmarks/README.md) — fixtures, runners, selection IDs, and reproduction commands
 - [Raw results and checksums](results/raw/)
@@ -147,7 +156,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 
 ## Star history
 
-[![OpenJev star history](https://api.star-history.com/svg?repos=TheoLeeCJ/openjev&type=Date)](https://www.star-history.com/#TheoLeeCJ/openjev&Date)
+[![SemIf star history](https://api.star-history.com/svg?repos=TheoLeeCJ/SemIf&type=Date)](https://www.star-history.com/#TheoLeeCJ/SemIf&Date)
 
 ## Evaluation sources
 
@@ -156,4 +165,4 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [WANLI](https://huggingface.co/datasets/alisawuffles/WANLI) — external natural-language inference check
 - [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B), [MiniCPM5-2B](https://huggingface.co/openbmb/MiniCPM5-2B), [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B), and [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B) — frozen baseline models
 
-This is an independent research project. Model weights and third-party records without a redistribution grant are excluded; immutable selection IDs and fetch manifests are included. Upstream models retain their licenses. Project code is released under the [MIT License](LICENSE).
+Model weights and third-party source records are not included. Upstream models retain their licenses. Project code is released under the [MIT License](LICENSE).

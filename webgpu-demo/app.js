@@ -6,6 +6,7 @@ const $ = (selector) => document.querySelector(selector);
 const loadButton = $("#load");
 const runButton = $("#run");
 const modelSelect = $("#model-select");
+const uiMode = $("#ui-mode");
 const models = {
   "qwen3-0.6b": {
     name: "Qwen3 0.6B", short: "Qwen3 · 0.6B", size: "639 MB",
@@ -48,6 +49,25 @@ const isMobileDevice = navigator.userAgentData?.mobile === true
 
 const supportState = reactive({ text: "Checking WebGPU…", kind: "", icon: "memory" });
 createApp({ setup: () => supportState }).mount("#support");
+
+function applyUiMode(plain) {
+  document.body.classList.toggle("plain-ui", plain);
+  uiMode.checked = plain;
+  try {
+    localStorage.setItem("semif-ui-mode", plain ? "plain" : "original");
+  } catch (_) {
+    // The preference is optional; inference does not depend on browser storage.
+  }
+}
+
+let savedUiMode = false;
+try {
+  savedUiMode = localStorage.getItem("semif-ui-mode") === "plain";
+} catch (_) {
+  // Some embedded browsers disable local storage.
+}
+applyUiMode(savedUiMode);
+uiMode.addEventListener("change", () => applyUiMode(uiMode.checked));
 
 function seconds(ms) {
   return `${(ms / 1000).toFixed(3)} s`;

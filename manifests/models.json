@@ -1,5 +1,5 @@
 {
-  "schema": "openjev-phase1-models-v1",
+  "schema": "semif-phase1-models-v1",
   "models": [
     {
       "role": "browser_ladder_phone_quality_reference",
