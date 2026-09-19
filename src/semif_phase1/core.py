@@ -113,7 +113,12 @@ def load_causal_model(
     dtype: str = "bfloat16",
     attn_implementation: str = "sdpa",
 ):
-    """Load one pinned causal model on a single CUDA, XPU, or Apple GPU."""
+    """Load one pinned causal model on a single CUDA, XPU, or Apple GPU.
+
+    Pass device="cuda" or device="xpu" to require that accelerator without
+    falling back to the other. Leave it "auto" to prefer CUDA, then XPU,
+    then Apple MPS.
+    """
     import torch
     import transformers
 

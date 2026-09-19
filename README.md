@@ -45,7 +45,8 @@ Install `pip install -e '.[test,mlx]'` and add `--backend mlx` to the scorer com
 PyTorch/MPS (`--device mps`) is also supported for direct, serial, and shared modes — see
 [Apple Silicon](docs/APPLE_SILICON.md).
 
-**Intel Arc:** the Torch backend also runs on an Intel Arc GPU. See
+**Intel Arc:** the Torch backend also runs on an Intel Arc GPU. Add
+`--device xpu` to the scorer command to require it. See
 [Intel Arc (XPU)](docs/XPU.md) for the two-step install, device selection,
 and the known limits. The `xpu` extra records the validated torch pin.
 
