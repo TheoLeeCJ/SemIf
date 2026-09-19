@@ -1,0 +1,25 @@
+{
+  "authored144": {
+    "rows": 144,
+    "bridge_27b_exl3_balanced_accuracy": 0.9367,
+    "bridge_27b_exl3_accuracy": 0.9375,
+    "published_direct_4b_balanced_accuracy": 0.813,
+    "diff_vs_committed_direct_4b_predictions": {
+      "both_right": 111,
+      "fixed_by_bridge": 24,
+      "regressed_by_bridge": 5,
+      "both_wrong": 4
+    },
+    "per_class_recall": {
+      "0": 0.9455,
+      "1": 0.9091,
+      "2": 0.9556
+    }
+  },
+  "shape777": {
+    "rows_compared": 777,
+    "bridge_27b_exl3_vs_committed_direct_4b_argmax_agreement": 0.8494,
+    "argmax_flips": 117,
+    "note": "family AND quantization differ from the pinned baseline; agreement is a bridge-vs-pinned delta, not a quantization ablation"
+  }
+}

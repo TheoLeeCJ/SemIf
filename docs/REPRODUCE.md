@@ -119,3 +119,18 @@ python benchmarks/verify_published.py
 ```
 
 The source-specific quality commands above regenerate the metrics stored in `results/raw/quality-comparison.json`. `verify_published.py` checks 69 published summary values against that report plus the perturbation, systems, and generation reports. It deliberately does not require byte-identical GPU reruns.
+
+## exl3 bridge probe (quantized readout, additive track)
+
+Row-level probe evidence and reproduction for the quantized-readout bridge
+live in `exl3-bridge/` (see its README for the exact container invocation,
+pinned exllamav3 runtime, and quantized checkpoint revision). Verify its
+bundle with:
+
+```bash
+(cd exl3-bridge/results && sha256sum -c SHA256SUMS)
+python -m pytest exl3-bridge/test_bridge.py -q
+```
+
+The bridge does not participate in the headline matrix and none of
+`results/phase1-summary.json` applies to it.

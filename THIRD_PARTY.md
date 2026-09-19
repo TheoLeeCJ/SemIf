@@ -16,6 +16,8 @@ No model weights or third-party raw evaluation records are distributed here.
 | Qwen3-0.6B GGUF | https://huggingface.co/Qwen/Qwen3-0.6B-GGUF | `23749fefcc72300e3a2ad315e1317431b06b590a` | External Q8_0 browser model; weights are not redistributed. |
 | MiniCPM5-2B GGUF | https://huggingface.co/openbmb/MiniCPM5-2B-GGUF | `2079a22f3beaa4e306449978533478fe0522f4b3` | External Q4_K_M browser model; Apache-2.0 on its model card; weights are not redistributed. |
 | Qwen3.5-4B GGUF | https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF | `4168f45a16a1290d65a4ec0fa312ae917a4c15d6` | External Q4_K_M browser model; weights are not redistributed. |
+| Qwen3.8-27B exl3 quant | https://huggingface.co/turboderp/Qwen3.8-27B-exl3 | `a35e75a73baee51da709329d19294245cbeeb5d8` (5.00bpw) | Probe checkpoint for `exl3-bridge/`; upstream (turboderp) terms and Qwen base-model license apply. |
+| exllamav3 | https://github.com/turboderp-org/exllamav3 | `1.4.4+cu128.torch2.10.0` | Bridge runtime (`exl3-bridge/`); MIT. |
 
 These URLs were checked on 2026-09-18. Downloaded evaluation inputs are pinned by SHA-256.
 
