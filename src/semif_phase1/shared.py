@@ -8,7 +8,7 @@ import json
 import time
 
 from .core import direct_messages, softmax, synchronize
-from .direct import PROMPT_VERSION, encode_prompt
+from .direct import PROMPT_VERSION, cached_forward, encode_prompt
 
 
 def _state_prefix(tokenizer, state) -> list[int]:
@@ -81,12 +81,12 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     with torch.inference_mode():
         sync()
         mark = time.perf_counter()
-        output = model(
-            input_ids=torch.tensor([prefix], dtype=torch.long, device=device),
-            attention_mask=torch.ones((1, len(prefix)), dtype=torch.long, device=device),
-            use_cache=True,
-            return_dict=True,
-            logits_to_keep=1,
+        output = cached_forward(
+            model,
+            {
+                "input_ids": torch.tensor([prefix], dtype=torch.long, device=device),
+                "attention_mask": torch.ones((1, len(prefix)), dtype=torch.long, device=device),
+            },
         )
         cache = output.past_key_values
         del output
