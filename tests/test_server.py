@@ -8,7 +8,6 @@ from semif_phase1.server import _parser, _validate_args
 def args(**changes):
     values = {
         "backend": "torch",
-        "mode": "direct",
         "model": "unused",
         "revision": "unused",
         "served_model": "semif-test",

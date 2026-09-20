@@ -12,7 +12,6 @@ from .system_one import SystemOneService
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("torch", "mlx"), default="torch")
-    parser.add_argument("--mode", choices=("direct", "shared"), default="direct")
     parser.add_argument("--model", required=True, help="Hugging Face model ID or local model path")
     parser.add_argument("--revision", required=True)
     parser.add_argument("--served-model", required=True, help="Model ID accepted by the HTTP API")
@@ -66,20 +65,16 @@ def _scorer(args):
         model, tokenizer, metadata = mlx_backend.load_model(
             args.model, args.revision, args.mlx_bits, cache_limit_mib=cache_limit
         )
-        direct, shared = mlx_backend.score, mlx_backend.score_shared
+        direct = mlx_backend.score
     else:
         from .core import load_causal_model
         from .direct import score as direct
-        from .shared import score_shared as shared
 
         model, tokenizer, metadata = load_causal_model(args.model, args.revision)
 
-    if args.mode == "shared":
-        def score_rows(rows):
-            return shared(model, tokenizer, rows, metadata, args.max_tokens)[0]
-    else:
-        def score_rows(rows):
-            return [direct(model, tokenizer, row, metadata, args.max_tokens) for row in rows]
+    def score_rows(rows):
+        return [direct(model, tokenizer, row, metadata, args.max_tokens) for row in rows]
+
     return score_rows
 
 

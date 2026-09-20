@@ -7,7 +7,7 @@ The implemented contract follows the public [TypeSafe API reference](https://doc
 - `noul` maps to two SemIf options and returns the probability assigned to `true`.
 - `choice` returns the highest-probability option and the complete option distribution.
 - `score` treats the ordered criteria as levels `0..N-1` and returns their probability-weighted value.
-- Multiple questions share one request state. `--mode direct` scores them independently; `--mode shared` uses SemIf's experimental native prefix-sharing path.
+- Multiple questions share one request state and are scored independently with SemIf's direct option-logit path. The experimental shared-prefix scorer is not exposed by this service because the repository does not claim that its decisions are semantically equivalent to direct scoring.
 - `GET /v1/models` returns the single configured SemIf model.
 
 ## Install and run
