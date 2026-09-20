@@ -23,9 +23,19 @@ dependencies = [
 
 [project.scripts]
 semif-score = "semif_phase1.cli:main"
+semif-serve = "semif_phase1.server:main"
 
 [project.optional-dependencies]
-test = ["pytest==8.4.2"]
+api = [
+  "fastapi==0.141.1",
+  "uvicorn==0.53.0",
+]
+test = [
+  "pytest==8.4.2",
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "uvicorn==0.53.0",
+]
 mlx = [
   "mlx==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx-lm @ git+https://github.com/ml-explore/mlx-lm.git@a63e24c389382619eb6d9af656e3b46024be217a ; sys_platform == 'darwin' and platform_machine == 'arm64'",

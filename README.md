@@ -59,6 +59,12 @@ Each result contains typed option scores, timing, the exact model revision, and 
 
 If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
 
+### System One-compatible HTTP API
+
+Install the `api` extra and run `semif-serve` to keep one model resident behind `POST /v1/systemone` and `GET /v1/models`. The adapter accepts TypeSafe's documented `state`, `model`, and `questions` wire shape, including `noul`, `choice`, and `score` questions. It does not serve Jev or reproduce Jev calibration; requests must name the configured SemIf model.
+
+See [System One-compatible API](docs/SYSTEM_ONE_API.md) for the server command, request example, authentication, confidence definition, and compatibility limits.
+
 ## How it works
 
 ```mermaid
@@ -151,6 +157,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
+- [System One-compatible API](docs/SYSTEM_ONE_API.md) — HTTP server, wire format, and compatibility boundaries
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
 - [Machine-readable summary](results/phase1-summary.json)
