@@ -1,0 +1,4 @@
+# Evidence checksums refer to LF Git blobs, including on Windows checkouts.
+results/raw/**/*.json text eol=lf
+results/raw/**/*.jsonl text eol=lf
+results/raw/SHA256SUMS text eol=lf

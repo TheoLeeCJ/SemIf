@@ -9,7 +9,7 @@ python -m venv .venv
 . .venv/bin/activate
 export HF_HOME=/path/to/large-drive/huggingface
 pip install -r requirements.txt
-pip install -e .
+pip install -e '.[test,torch]'
 pytest -q
 ```
 
