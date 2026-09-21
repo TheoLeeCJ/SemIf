@@ -35,7 +35,22 @@ This baseline reads typed option probabilities directly from a model. No answer 
 serial prefix reuse, and parallel shared-state decisions on macOS arm64.
 Install `pip install -e '.[test,mlx]'` and add `--backend mlx` to the scorer command.
 
-Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
+Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model.
+One command from nothing but `uv` — it fetches Python, creates the
+environment, and installs the locked dependencies:
+
+```bash
+export HF_HOME=/path/to/large-drive/huggingface
+uv run --frozen semif-serve \
+  --mode direct \
+  --model Qwen/Qwen3.5-4B \
+  --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
+  --port 8000
+```
+(PowerShell: use backticks instead of `\` for line breaks, or run it as one
+line, with `$env:HF_HOME="..."`.)
+
+Or with plain pip:
 
 ```bash
 python -m venv .venv
