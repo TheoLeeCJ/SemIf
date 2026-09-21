@@ -35,13 +35,18 @@ This baseline reads typed option probabilities directly from a model. No answer 
 serial prefix reuse, and parallel shared-state decisions on macOS arm64.
 Install `pip install -e '.[test,mlx]'` and add `--backend mlx` to the scorer command.
 
+**AMD Ryzen AI (Windows):** use the [Ryzen AI NPU backend](docs/RYZENAI.md)
+with Ryzen AI Software 1.8.0 and AMD's pinned Qwen3-4B NPU artifacts (4K or 16K).
+Add `--backend ryzenai-npu --mode direct` to score the same JSONL input from
+native option logits. The setup guide covers the separate AMD runtime environment.
+
 Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 export HF_HOME=/path/to/large-drive/huggingface
-pip install -e '.[test]'
+pip install -e '.[test,torch]'
 ```
 
 Run the owned examples:
@@ -56,6 +61,10 @@ CUDA_VISIBLE_DEVICES=0 semif-score \
 ```
 
 Each result contains typed option scores, timing, the exact model revision, and a prompt hash.
+
+Runtime dependencies are selected through the `torch`, `mlx`, or `ryzenai`
+extras. A base/test install does not install a model runtime. Use a separate
+environment for Ryzen AI; its NumPy and Transformers pins differ from CUDA/MLX.
 
 If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
 
@@ -151,6 +160,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
+- [Ryzen AI NPU setup](docs/RYZENAI.md) — Windows direct scoring with AMD's 4K/16K models
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
 - [Machine-readable summary](results/phase1-summary.json)
