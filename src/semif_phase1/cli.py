@@ -47,17 +47,14 @@ def main() -> None:
             parser.error("--llama-threads must be positive")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
-    if args.backend == "llamacpp":
-        if args.mode == "reranker":
-            parser.error("llama.cpp supports direct, serial, and shared modes; reranker requires torch")
-        if args.gguf is None or not args.gguf.is_file():
-            parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
+    if args.backend == "llamacpp" and (args.gguf is None or not args.gguf.is_file()):
+        parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     if not rows:
         parser.error("Input is empty")
     for row in rows:
         validate_row(row)
-    direct, serial, shared = direct_score, SerialPrefixScorer, score_shared
+    direct, serial, shared, reranker = direct_score, SerialPrefixScorer, score_shared, reranker_score
     if args.backend == "mlx":
         from . import mlx_backend
 
@@ -72,8 +69,8 @@ def main() -> None:
         model, tokenizer, metadata = llamacpp_backend.load_model(
             args.model, args.revision, args.gguf,
             threads=args.llama_threads, context_tokens=args.max_tokens)
-        direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
-                                  llamacpp_backend.score_shared)
+        direct, serial, shared, reranker = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
+                                            llamacpp_backend.score_shared, llamacpp_backend.reranker_score)
     else:
         model, tokenizer, metadata = load_causal_model(args.model, args.revision)
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +85,7 @@ def main() -> None:
                 destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
                 destination.flush()
         else:
-            scorer = direct if args.mode == "direct" else reranker_score
+            scorer = direct if args.mode == "direct" else reranker
             for row in rows:
                 destination.write(json.dumps(scorer(model, tokenizer, row, metadata, args.max_tokens), allow_nan=False) + "\n")
                 destination.flush()

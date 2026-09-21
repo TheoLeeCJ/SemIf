@@ -25,8 +25,10 @@ import time
 
 import numpy
 
-from .core import LETTERS, direct_messages, softmax
+from .core import LETTERS, digest, direct_messages, softmax, validate_row
 from .direct import PROMPT_VERSION, encode_prompt
+from .reranker import PROMPT_VERSION as RERANKER_PROMPT_VERSION
+from .reranker import _answer_ids, render_pair
 from .shared import _state_prefix
 
 DECODE_CHUNK = 512
@@ -256,6 +258,62 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
     )
     result.update(forward_seconds=time.perf_counter() - mark, total_seconds=time.perf_counter() - started)
     return result
+
+
+def reranker_score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -> dict:
+    """Score each row/option relevance pair through the quantized reranker prompt."""
+    validate_row(row)
+    no_id, yes_id = _answer_ids(tokenizer)
+    for token, answer in ((no_id, b"no"), (yes_id, b"yes")):
+        if _gguf_piece(model.engine.lib, model.vocab, token) != answer:
+            raise RuntimeError(f"The GGUF vocabulary does not carry the reranker {answer.decode()!r} answer token")
+    started = time.perf_counter()
+    scored, forward_seconds = [], 0.0
+    for option in row["options"]:
+        text = render_pair(row, option)
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        if not ids or len(ids) > max_tokens:
+            raise ValueError(f"Row {row['id']} option {option['id']}: {len(ids)} tokens exceed limit {max_tokens}")
+        if _gguf_tokenize(model.engine.lib, model.vocab, text) != ids:
+            raise ValueError(f"Row {row['id']} option {option['id']}: GGUF tokenization disagrees with the reference tokenizer")
+        mark = time.perf_counter()
+        vocabulary = model.engine.full_logits(ids)
+        forward_seconds += time.perf_counter() - mark
+        odds = float(vocabulary[yes_id]) - float(vocabulary[no_id])
+        weights = numpy.exp(numpy.asarray([0.0, odds], dtype=numpy.float64))
+        scored.append(
+            {
+                "option_id": option["id"],
+                "log_odds": odds,
+                "binary_relevance": float(weights[1] / weights.sum()),
+                "input_tokens": len(ids),
+                "prompt_sha256": digest(text),
+            }
+        )
+    log_odds = [item["log_odds"] for item in scored]
+    binary = [item["binary_relevance"] for item in scored]
+    return {
+        "id": row["id"],
+        "option_ids": [option["id"] for option in row["options"]],
+        "probabilities": softmax(log_odds),
+        "option_logits": log_odds,
+        "independent_binary_relevance": binary,
+        "input_tokens": sum(item["input_tokens"] for item in scored),
+        "max_option_input_tokens": max(item["input_tokens"] for item in scored),
+        "forward_seconds": forward_seconds,
+        "total_seconds": time.perf_counter() - started,
+        "option_prompt_sha256": [item["prompt_sha256"] for item in scored],
+        "pair_batches": [{
+            "pair_batch_size": len(scored),
+            "forward_seconds": forward_seconds,
+            "padded_tokens": sum(item["input_tokens"] for item in scored),
+            "execution": "sequential-per-pair",
+        }],
+        "prompt_version": RERANKER_PROMPT_VERSION,
+        "model": {**metadata, "serving_config": "llamacpp-reranker-v1"},
+        "readout": "quantized yes/no log-odds per option, normalized only for relative comparison",
+        "probability_status": "relative option compatibility over quantized weights; uncalibrated as categorical probability",
+    }
 
 
 class SerialPrefixScorer:
