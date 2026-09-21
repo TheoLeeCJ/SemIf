@@ -54,6 +54,17 @@ export HF_HOME=/path/to/large-drive/huggingface
 pip install -e '.[test]'
 ```
 
+**CPU only:** the llama.cpp backend scores the same prompts from a local GGUF
+checkpoint with no CUDA device, in `direct`, `serial`, `shared`, and
+`reranker` modes. Install `pip install -e '.[test,llamacpp]'`, fetch a GGUF
+(for example `Qwen_Qwen3.5-4B-Q4_K_M.gguf` from
+`bartowski/Qwen_Qwen3.5-4B-GGUF`; reranker mode wants the reranker's own
+GGUF, e.g. `QuantFactory/Qwen3-Reranker-4B-GGUF`), and add `--backend
+llamacpp --gguf /path/to/model.gguf`; `--llama-threads` caps the CPU threads.
+Prompt construction stays on the pinned reference tokenizer, so
+`prompt_sha256` matches the Torch backend row for row; scores carry the GGUF
+checksum and are conditional on the quantized weights.
+
 Run the owned examples:
 
 ```bash

@@ -16,10 +16,13 @@ from .shared import score_shared
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker"), required=True)
-    parser.add_argument("--backend", choices=("torch", "mlx"), default="torch")
+    parser.add_argument("--backend", choices=("torch", "mlx", "llamacpp"), default="torch")
     parser.add_argument("--mlx-bits", type=int, choices=(4, 8), help="Quantize MLX weights in memory; default preserves source precision")
     parser.add_argument("--mlx-cache-limit-mib", type=int,
                         help="MLX inactive allocation cache in MiB (default: 256; 0 disables caching)")
+    parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
+    parser.add_argument("--llama-threads", type=int,
+                        help="CPU threads for --backend llamacpp (default: all visible cores)")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -39,14 +42,23 @@ def main() -> None:
             parser.error("--mlx-cache-limit-mib requires --backend mlx")
         if args.mlx_cache_limit_mib < 0:
             parser.error("--mlx-cache-limit-mib must be nonnegative")
+    if args.gguf is not None and args.backend != "llamacpp":
+        parser.error("--gguf requires --backend llamacpp")
+    if args.llama_threads is not None:
+        if args.backend != "llamacpp":
+            parser.error("--llama-threads requires --backend llamacpp")
+        if args.llama_threads < 1:
+            parser.error("--llama-threads must be positive")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
+    if args.backend == "llamacpp" and (args.gguf is None or not args.gguf.is_file()):
+        parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     if not rows:
         parser.error("Input is empty")
     for row in rows:
         validate_row(row)
-    direct, serial, shared = direct_score, SerialPrefixScorer, score_shared
+    direct, serial, shared, reranker = direct_score, SerialPrefixScorer, score_shared, reranker_score
     if args.backend == "mlx":
         from . import mlx_backend
 
@@ -55,6 +67,14 @@ def main() -> None:
         model, tokenizer, metadata = mlx_backend.load_model(
             args.model, args.revision, args.mlx_bits, cache_limit_mib=cache_limit_mib)
         direct, serial, shared = mlx_backend.score, mlx_backend.SerialPrefixScorer, mlx_backend.score_shared
+    elif args.backend == "llamacpp":
+        from . import llamacpp_backend
+
+        model, tokenizer, metadata = llamacpp_backend.load_model(
+            args.model, args.revision, args.gguf,
+            threads=args.llama_threads, context_tokens=args.max_tokens)
+        direct, serial, shared, reranker = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
+                                            llamacpp_backend.score_shared, llamacpp_backend.reranker_score)
     else:
         if args.mode == "reranker":
             if args.device == "mps":
@@ -74,7 +94,7 @@ def main() -> None:
                 destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
                 destination.flush()
         else:
-            scorer = direct if args.mode == "direct" else reranker_score
+            scorer = direct if args.mode == "direct" else reranker
             for row in rows:
                 destination.write(json.dumps(scorer(model, tokenizer, row, metadata, args.max_tokens), allow_nan=False) + "\n")
                 destination.flush()

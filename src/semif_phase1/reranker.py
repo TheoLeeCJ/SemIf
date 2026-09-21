@@ -23,7 +23,8 @@ RETRIEVAL_INSTRUCTION = (
 PROMPT_VERSION = "qwen3-reranker-native-options-v1"
 
 
-def _encode(tokenizer, row, option, max_tokens):
+def render_pair(row: dict, option: dict) -> str:
+    """Render the official-style relevance prompt for one row/option pair."""
     experiment = row.get("provenance", {}).get("experiment")
     instruction = RETRIEVAL_INSTRUCTION if experiment in {"code-rag", "company-brain"} else DECISION_INSTRUCTION
     body = (
@@ -31,7 +32,11 @@ def _encode(tokenizer, row, option, max_tokens):
         f"<Query>: Question: {row['question']}\nCandidate answer: {option['description']}\n"
         f"<Document>: {row['state']}"
     )
-    text = PREFIX + body + SUFFIX
+    return PREFIX + body + SUFFIX
+
+
+def _encode(tokenizer, row, option, max_tokens):
+    text = render_pair(row, option)
     ids = tokenizer.encode(text, add_special_tokens=False)
     if not ids or len(ids) > max_tokens:
         raise ValueError(f"Row {row['id']} option {option['id']}: {len(ids)} tokens exceed limit {max_tokens}")
