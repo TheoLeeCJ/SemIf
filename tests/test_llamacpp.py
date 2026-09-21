@@ -119,13 +119,15 @@ def test_ctypes_structs_match_current_llama_abi():
 
 
 def test_resolve_llama_lib_uses_env_then_explicit(tmp_path, monkeypatch):
-    missing = tmp_path / "missing.so"
-    present = tmp_path / "libllama.so"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    present = tmp_path / "found" / "libllama.so"
+    present.parent.mkdir()
     present.write_bytes(b"so")
     monkeypatch.delenv("SEMIF_LLAMA_LIB", raising=False)
     monkeypatch.delenv("LLAMA_CPP_LIB", raising=False)
     monkeypatch.delenv("LLAMA_CPP_LIB_PATH", raising=False)
-    monkeypatch.setattr(llamacpp_backend, "_UNSLOTH_LIB", missing)
+    monkeypatch.setattr(llamacpp_backend, "_UNSLOTH_LIB", empty / "libllama.so.0")
     assert llamacpp_backend.resolve_llama_lib(present) == present.resolve()
     monkeypatch.setenv("SEMIF_LLAMA_LIB", str(present))
     assert llamacpp_backend.resolve_llama_lib() == present.resolve()
