@@ -35,6 +35,23 @@ This baseline reads typed option probabilities directly from a model. No answer 
 serial prefix reuse, and parallel shared-state decisions on macOS arm64.
 Install `pip install -e '.[test,mlx]'` and add `--backend mlx` to the scorer command.
 
+**GGUF (Linux CUDA or CPU):** the [llama.cpp backend](docs/LLAMACPP.md) scores the
+same prompts from a local GGUF with last-position logits. Torch stays BF16;
+MLX `--mlx-bits` stays Apple. Point `--llama-lib` or `SEMIF_LLAMA_LIB` at a
+CUDA `libllama.so` (for example an Unsloth build). Do not install the pip
+`llama-cpp-python` CUDA wheel on AVX2-only CPUs. Quantized scores are not the
+published BF16 ladder.
+
+```bash
+semif-score --mode direct --backend llamacpp \
+  --model Qwen/Qwen3.5-4B \
+  --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
+  --gguf /path/to/Qwen_Qwen3.5-4B-Q4_K_M.gguf \
+  --llama-gpu-layers 99 \
+  --input examples/decisions.jsonl \
+  --output results-gguf-direct.jsonl
+```
+
 Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
 
 ```bash
@@ -151,6 +168,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
+- [llama.cpp GGUF](docs/LLAMACPP.md) — quantized CUDA/CPU scoring; not the BF16 ladder
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
 - [Machine-readable summary](results/phase1-summary.json)

@@ -36,6 +36,11 @@ CUDA_VISIBLE_DEVICES=0 semif-score --mode reranker \
   --input examples/decisions.jsonl --output results-reranker.jsonl
 ```
 
+Linux GGUF scoring uses `--backend llamacpp` and a local checkpoint; see
+[LLAMACPP.md](LLAMACPP.md). That path is quantized last-position logits, not the
+BF16 numbers in `results/phase1-summary.json`. MLX `--mlx-bits` remains Apple
+Silicon only. Torch remains native BF16.
+
 The command refuses an existing output path and refuses silent input truncation. Each output embeds the exact revision, library versions, prompt hash, token count, timings, and an explicit probability-status warning. State may be a nonempty string, JSON object, or JSON array. `serial` caches consecutive equal states. `shared` requires every input row to carry the same exact state and is exercised by the 37×21 runner below.
 
 ## Third-party evaluations

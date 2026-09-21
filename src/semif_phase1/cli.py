@@ -16,10 +16,17 @@ from .shared import score_shared
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker"), required=True)
-    parser.add_argument("--backend", choices=("torch", "mlx"), default="torch")
+    parser.add_argument("--backend", choices=("torch", "mlx", "llamacpp"), default="torch")
     parser.add_argument("--mlx-bits", type=int, choices=(4, 8), help="Quantize MLX weights in memory; default preserves source precision")
     parser.add_argument("--mlx-cache-limit-mib", type=int,
                         help="MLX inactive allocation cache in MiB (default: 256; 0 disables caching)")
+    parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
+    parser.add_argument("--llama-threads", type=int,
+                        help="CPU threads for --backend llamacpp (default: all visible cores)")
+    parser.add_argument("--llama-gpu-layers", type=int,
+                        help="GPU layers for --backend llamacpp (default: 99; 0 = CPU; -1 = all)")
+    parser.add_argument("--llama-lib", type=Path,
+                        help="Path to libllama.so for --backend llamacpp (default: SEMIF_LLAMA_LIB or Unsloth CUDA build)")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -35,8 +42,27 @@ def main() -> None:
             parser.error("--mlx-cache-limit-mib requires --backend mlx")
         if args.mlx_cache_limit_mib < 0:
             parser.error("--mlx-cache-limit-mib must be nonnegative")
+    if args.gguf is not None and args.backend != "llamacpp":
+        parser.error("--gguf requires --backend llamacpp")
+    if args.llama_threads is not None:
+        if args.backend != "llamacpp":
+            parser.error("--llama-threads requires --backend llamacpp")
+        if args.llama_threads < 1:
+            parser.error("--llama-threads must be positive")
+    if args.llama_gpu_layers is not None:
+        if args.backend != "llamacpp":
+            parser.error("--llama-gpu-layers requires --backend llamacpp")
+        if args.llama_gpu_layers < -1:
+            parser.error("--llama-gpu-layers must be -1 or nonnegative")
+    if args.llama_lib is not None and args.backend != "llamacpp":
+        parser.error("--llama-lib requires --backend llamacpp")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
+    if args.backend == "llamacpp":
+        if args.mode == "reranker":
+            parser.error("llama.cpp supports direct, serial, and shared modes; reranker requires torch")
+        if args.gguf is None or not args.gguf.is_file():
+            parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     if not rows:
         parser.error("Input is empty")
@@ -51,6 +77,17 @@ def main() -> None:
         model, tokenizer, metadata = mlx_backend.load_model(
             args.model, args.revision, args.mlx_bits, cache_limit_mib=cache_limit_mib)
         direct, serial, shared = mlx_backend.score, mlx_backend.SerialPrefixScorer, mlx_backend.score_shared
+    elif args.backend == "llamacpp":
+        from . import llamacpp_backend
+
+        gpu_layers = (llamacpp_backend.DEFAULT_GPU_LAYERS if args.llama_gpu_layers is None
+                      else args.llama_gpu_layers)
+        model, tokenizer, metadata = llamacpp_backend.load_model(
+            args.model, args.revision, args.gguf,
+            threads=args.llama_threads, context_tokens=args.max_tokens,
+            n_gpu_layers=gpu_layers, llama_lib=args.llama_lib)
+        direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
+                                  llamacpp_backend.score_shared)
     else:
         model, tokenizer, metadata = load_causal_model(args.model, args.revision)
     args.output.parent.mkdir(parents=True, exist_ok=True)
