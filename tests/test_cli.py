@@ -154,3 +154,8 @@ def test_existing_output_is_not_overwritten(run_cli, backends, capsys):
     assert run_cli.output.read_bytes() == original
     backends.torch.load_causal_model.assert_not_called()
     backends.mlx.load_model.assert_not_called()
+
+
+def test_torch_mps_defaults_to_float16(run_cli, backends):
+    run_cli.run("direct", "--device", "mps")
+    backends.torch.load_causal_model.assert_called_once_with("test/model", "a" * 40, "mps", "float16")

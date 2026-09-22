@@ -94,7 +94,7 @@ def synchronize(device) -> None:
         torch.mps.synchronize()
 
 
-def load_causal_model(source: str, revision: str, device: str = "auto", dtype: str = "bfloat16"):
+def load_causal_model(source: str, revision: str, device: str = "auto", dtype: str | None = None):
     """Load one pinned causal model on a single CUDA or Apple GPU."""
     import torch
     import transformers
@@ -105,6 +105,8 @@ def load_causal_model(source: str, revision: str, device: str = "auto", dtype: s
     if local and not revision:
         raise ValueError("Local models require an explicit manifest/revision string")
     target = resolve_device(device)
+    if dtype is None:
+        dtype = "float16" if target.type == "mps" else "bfloat16"
     if dtype not in {"bfloat16", "float16", "float32"}:
         raise ValueError("Dtype must be bfloat16, float16, or float32")
     common = {"revision": None if local else revision, "local_files_only": local, "trust_remote_code": False}
