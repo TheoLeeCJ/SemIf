@@ -38,6 +38,8 @@ semif-score --backend mlx --mode direct \
   batch-1 suffixes rather than a parallel batch. CUDA keeps its batched path.
 - Timing fields are device-synchronized on both backends. Shared timing separates
   prompt encoding, prefix prefill, cache replication/copying, and suffix forwards.
+- PyTorch MPS defaults to `float16` for native Metal compatibility and performance
+  (`bfloat16` remains supported via `--dtype bfloat16`).
 - The reranker and published CUDA benchmark runners remain CUDA-only. Use the
   `semif-score` commands above for Apple Silicon.
 
