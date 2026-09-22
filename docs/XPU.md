@@ -60,35 +60,58 @@ final logits come from the last step. This chunked path gives the same
 result as one full forward on CPU. The workaround runs on XPU only. It does
 not change the CUDA or CPU path in any way.
 
-## Generation settings for XPU
+## Reproducing the evidence: `benchmarks/xpu_benchmark.py`
 
-The compact-generation benchmark needs two extra settings on XPU:
+`benchmarks/shape777.py`, `benchmarks/shape777_reranker.py`, and
+`benchmarks/decision_vs_generation.py` are the published CUDA benchmark
+runners; they stay CUDA-only, the same way they stay CUDA-only for Apple
+Silicon (see [Apple Silicon](APPLE_SILICON.md), which keeps those same
+three scripts CUDA-only for MPS too). XPU evidence instead has its own
+dedicated script, following the same precedent the MLX backend already
+set with `benchmarks/mlx_benchmark.py`: a separate runner with its own
+result schema and its own `peak_xpu_bytes` memory field, instead of a
+`peak_cuda_bytes` field reused across backends.
 
 ```bash
-python benchmarks/decision_vs_generation.py \
-  --prefill-chunk-size 512 --attention eager \
-  --model Qwen/Qwen3.5-4B \
-  --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
-  --input benchmarks/data/shape777.jsonl \
-  --output /path/to/new-generation-a770.json
+python benchmarks/xpu_benchmark.py --suite shape --output results/xpu/my-a770-shape
+python benchmarks/xpu_benchmark.py --suite generation --output results/xpu/my-a770-generation
+python benchmarks/xpu_benchmark.py --suite all --output results/xpu/my-a770-run
 ```
 
-`--prefill-chunk-size 512` keeps every internal prefill forward under the
-corruption length. `--attention eager` avoids a separate decode-side defect
-that repeats one token under `sdpa` on XPU. With both settings, generation
-reproduced the published 21-item array exactly. Both flags default to
-upstream behavior when omitted; only XPU runs need them.
+Each run requires a new output directory. The runner records:
+
+- **Shape:** all 777 decisions in `fresh`, `serial_prefix`, and
+  `parallel_shared` modes, including per-state latency, peak XPU
+  allocation, every choice change against the run's own `fresh` mode
+  (`vs_fresh`), and every choice change against the published CUDA
+  `results/raw/shape777-direct.predictions.jsonl` rows (`vs_published_cuda`).
+- **Generation:** three repetitions comparing direct shared-state scoring
+  against the same model writing a compact yes/no array, using
+  `--prefill-chunk-size 512 --attention eager` by default (both
+  overridable) to avoid the two defects described above. Records raw
+  output, validity, first-token timing, completion timing, and agreement
+  with direct.
+
+The loader is called with `device="xpu"` explicitly, so a run only
+proceeds on the Intel GPU; it does not fall back to CUDA. Like
+`mlx_benchmark.py`, this runner has no reranker suite: reranker mode is
+CUDA-only for XPU too (`semif-score --mode reranker` rejects `--device
+xpu`), matching the precedent both MPS and MLX already set.
 
 ## Reranker drift on XPU
 
-The reranker benchmark runs on XPU and completes. Its choices drift from
-the published NVIDIA choices. The reranker readout compares two large
-yes/no logits, near 17 in magnitude. Their difference is small, often
-between 0.1 and 1.0. Small BF16 rounding differences can flip that small
-difference's sign. A CPU FP32 reference matched the published NVIDIA
-choices, not the A770 choices. This points to readout sensitivity, not a
-port bug. Treat reranker output on XPU as informational only. Do not use it
-as a matched reproduction of the published reranker result.
+The committed `results/xpu/` evidence bundle records one reranker
+benchmark run from before this repository settled on the CUDA-only
+reranker precedent (see above); it predates `xpu_benchmark.py`, which does
+not reproduce it. Its choices drift from the published NVIDIA choices.
+The reranker readout compares two large yes/no logits, near 17 in
+magnitude. Their difference is small, often between 0.1 and 1.0. Small
+BF16 rounding differences can flip that small difference's sign. A CPU
+FP32 reference matched the published NVIDIA choices, not the A770
+choices. This points to readout sensitivity, not a port bug. Treat that
+evidence as historical and informational only, not a matched
+reproduction, and not something `semif-score` or `xpu_benchmark.py` will
+reproduce today.
 
 ## What this port validates
 
@@ -98,8 +121,10 @@ maximum probability difference near 0.09. This sits inside the repository's
 own same-GPU drift range. Compact generation with the two settings above
 reproduced the published 21-item array exactly.
 
-Limited: reranker choices drift on XPU, for the readout-sensitivity reason
-above. Treat reranker output on XPU as informational only.
+Blocked: reranker mode is CUDA-only, matching the MPS and MLX precedent.
+The one committed reranker run on XPU is historical evidence from before
+that decision and drifts from the published NVIDIA choices, for the
+readout-sensitivity reason above.
 
 Untested: other Arc cards, multiple GPUs, Windows, and torch versions other
 than `2.10.0+xpu`. The Arc B580 is expected to work but was not the
