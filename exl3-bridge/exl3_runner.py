@@ -91,9 +91,16 @@ def main() -> None:
         for i, row in enumerate(rows):
             started = time.perf_counter()
             messages = direct_messages(row)  # validates row (2-16 options etc.)
-            text = tokenizer.hf_render_chat_template(
-                messages, add_generation_prompt=True, enable_thinking=False
-            )
+            # enable_thinking is a Qwen-template parameter; templates that don't
+            # declare it (e.g. Gemma) reject the kwarg, so fall back without it
+            try:
+                text = tokenizer.hf_render_chat_template(
+                    messages, add_generation_prompt=True, enable_thinking=False
+                )
+            except Exception:
+                text = tokenizer.hf_render_chat_template(
+                    messages, add_generation_prompt=True
+                )
             ids = encode_ids(tokenizer, text)
             if not ids or len(ids) + 8 > args.cache_size:
                 rec = {"id": row["id"], "status": "refused_over_cache_budget",

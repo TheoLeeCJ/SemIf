@@ -17,7 +17,10 @@ No model weights or third-party raw evaluation records are distributed here.
 | MiniCPM5-2B GGUF | https://huggingface.co/openbmb/MiniCPM5-2B-GGUF | `2079a22f3beaa4e306449978533478fe0522f4b3` | External Q4_K_M browser model; Apache-2.0 on its model card; weights are not redistributed. |
 | Qwen3.5-4B GGUF | https://huggingface.co/bartowski/Qwen_Qwen3.5-4B-GGUF | `4168f45a16a1290d65a4ec0fa312ae917a4c15d6` | External Q4_K_M browser model; weights are not redistributed. |
 | Qwen3.8-27B exl3 quant | https://huggingface.co/turboderp/Qwen3.8-27B-exl3 | `a35e75a73baee51da709329d19294245cbeeb5d8` (5.00bpw) | Probe checkpoint for `exl3-bridge/`; upstream (turboderp) terms and Qwen base-model license apply. |
-| exllamav3 | https://github.com/turboderp-org/exllamav3 | `1.4.4+cu128.torch2.10.0` | Bridge runtime (`exl3-bridge/`); MIT. |
+| Qwen3.8-27B exl3 quant (2.00bpw) | https://huggingface.co/turboderp/Qwen3.8-27B-exl3 | `0cd1091272291d008e06976acb81e25946cdc767` (2.00bpw) | Low-bpw quantization ablation for `exl3-bridge/`; same terms as above. |
+| Gemma-4 26B-A4B exl3 quant | https://huggingface.co/turboderp/gemma-4-26B-A4B-it-exl3 | `d20a0b4062b632525d9e2263a170e9b0de1cbde4` (2.10bpw) | MoE bridge model for `exl3-bridge/`; Gemma license (gemma-4) + upstream (turboderp) terms. |
+| Qwen3.5-9B exl3 quant (off-repo trial) | https://huggingface.co/turboderp/Qwen3.5-9B-exl3 | `0508aa8eeca8` (2.00bpw) | Off-repo 9B trial only; no probe inputs/outputs committed. |
+| exllamav3 | https://github.com/turboderp-org/exllamav3 | `1.4.4+cu128.torch2.10.0` (Qwen exl3) / `1.5.1+cu128.torch2.10.0` (Gemma-4) | Bridge runtime (`exl3-bridge/`); MIT. |
 
 These URLs were checked on 2026-09-18. Downloaded evaluation inputs are pinned by SHA-256.
 

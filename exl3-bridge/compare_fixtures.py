@@ -7,7 +7,13 @@ shape777: argmax agreement against the committed pinned-4B row-level
 predictions (results/raw/shape777-direct.predictions.jsonl; runs majority).
 
 Project-owned fixtures only: no third-party data involved.
+
+With no arguments, this recomputes the committed `results/fixture-comparison.json`
+from the committed 27b 5.0bpw bridge fixtures. Pass `--authored`/`--shape`
+(pointing at any other bridge run's outputs, e.g. a different bpw or model)
+to evaluate that run instead; the summary is printed, or written with `--out`.
 """
+import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -16,6 +22,20 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 RES = Path(__file__).resolve().parent / "results"
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--authored", default=None,
+                help="bridge authored144 JSONL (default: committed 27b 5.0bpw fixture)")
+ap.add_argument("--shape", default=None,
+                help="bridge shape777 JSONL (default: committed 27b 5.0bpw fixture)")
+ap.add_argument("--out", default=None,
+                help="write summary JSON here (default: print only)")
+args = ap.parse_args()
+
+is_default = args.authored is None and args.shape is None
+authored_file = Path(args.authored) if args.authored else RES / "authored144-27b-exl3.jsonl"
+shape_file = Path(args.shape) if args.shape else RES / "shape777-27b-exl3.jsonl"
+tag = "bridge_27b_exl3" if is_default else "bridge"
 
 
 def load(path):
@@ -30,7 +50,7 @@ def argmax_option(row):
 # ---- authored144: gold-label balanced accuracy ------------------------------
 gold = {r["id"]: r["label"] for r in load(ROOT / "benchmarks" / "data" / "authored144.jsonl")}
 opts = {r["id"]: r["options"] for r in load(ROOT / "benchmarks" / "data" / "authored144.jsonl")}
-ours = {r["id"]: r for r in load(RES / "authored144-27b-exl3.jsonl") if r.get("status") == "ok"}
+ours = {r["id"]: r for r in load(authored_file) if r.get("status") == "ok"}
 y_true, y_pred, labels = [], [], set()
 for rid, r in ours.items():
     oid2ix = {o["id"]: i for i, o in enumerate(opts[rid])}
@@ -62,27 +82,33 @@ by_id = defaultdict(list)
 for r in pinned:
     by_id[r["id"]].append(argmax_option(r))
 majority = {i: Counter(v).most_common(1)[0][0] for i, v in by_id.items()}
-bridge = {r["id"]: r for r in load(RES / "shape777-27b-exl3.jsonl") if r.get("status") == "ok"}
+bridge = {r["id"]: r for r in load(shape_file) if r.get("status") == "ok"}
 shared = sorted(set(bridge) & set(majority))
 agree = sum(argmax_option(bridge[i]) == majority[i] for i in shared)
 
 summary = {
     "authored144": {
         "rows": len(y_true),
-        "bridge_27b_exl3_balanced_accuracy": round(auth_bal, 4),
-        "bridge_27b_exl3_accuracy": round(auth_acc, 4),
+        f"{tag}_balanced_accuracy": round(auth_bal, 4),
+        f"{tag}_accuracy": round(auth_acc, 4),
         "published_direct_4b_balanced_accuracy": 0.813,
         "diff_vs_committed_direct_4b_predictions": diff,
         "per_class_recall": per_class,
-        
     },
     "shape777": {
         "rows_compared": len(shared),
-        "bridge_27b_exl3_vs_committed_direct_4b_argmax_agreement": round(agree / len(shared), 4),
+        f"{tag}_vs_committed_direct_4b_argmax_agreement": round(agree / len(shared), 4),
         "argmax_flips": len(shared) - agree,
         "note": "family AND quantization differ from the pinned baseline; agreement "
                 "is a bridge-vs-pinned delta, not a quantization ablation",
     },
 }
-(RES / "fixture-comparison.json").write_text(json.dumps(summary, indent=2))
-print(json.dumps(summary, indent=2))
+if not is_default:
+    first = next((r for r in load(authored_file) if r.get("model")), None)
+    summary["model"] = first["model"] if first else None
+
+out_text = json.dumps(summary, indent=2)
+out_path = RES / "fixture-comparison.json" if is_default else (Path(args.out) if args.out else None)
+if out_path is not None:
+    out_path.write_text(out_text)
+print(out_text)
