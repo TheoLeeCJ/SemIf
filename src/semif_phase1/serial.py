@@ -10,6 +10,7 @@ import time
 
 from .core import direct_messages, softmax, synchronize
 from .direct import PROMPT_VERSION, encode_prompt
+from .shared import _fit_state_prefix
 
 
 def _state_prefix(tokenizer, state) -> list[int]:
@@ -58,10 +59,10 @@ class SerialPrefixScorer:
 
         started = time.perf_counter()
         ids, slots, prompt_hash = encode_prompt(self.tokenizer, row, self.max_tokens)
-        hit = self.cache is not None and row["state"] == self.state
-        prefix = self.prefix if hit else _state_prefix(self.tokenizer, row["state"])
-        if not prefix or ids[: len(prefix)] != prefix or len(ids) <= len(prefix):
-            raise ValueError("State prefix does not match the full prompt")
+        prefix = _fit_state_prefix(
+            _state_prefix(self.tokenizer, row["state"]), [(ids, slots, prompt_hash)]
+        )
+        hit = self.cache is not None and prefix == self.prefix
         sync = lambda: synchronize(self.device)
         prefill_seconds = 0.0
         self.model.eval()

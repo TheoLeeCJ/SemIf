@@ -37,6 +37,19 @@ def _state_prefix(tokenizer, state) -> list[int]:
     return tokenizer.encode(text, add_special_tokens=False)[:-1]
 
 
+def _fit_state_prefix(prefix: list[int], encoded: list[tuple[list[int], list[int], str]]) -> list[int]:
+    """Back off a candidate until it is a nonempty prefix of every full prompt."""
+    if not prefix or not encoded:
+        raise ValueError("Cannot establish a nonempty fixed state prefix")
+    limit = min(len(prefix), *(len(ids) - 1 for ids, _, _ in encoded))
+    length = 0
+    while length < limit and all(ids[length] == prefix[length] for ids, _, _ in encoded):
+        length += 1
+    if not length:
+        raise ValueError("Cannot establish a nonempty fixed state prefix")
+    return prefix[:length]
+
+
 def _suffix_layout(sequences: list[list[int]], prefix_length: int, pad_id: int):
     if not sequences or any(not sequence for sequence in sequences):
         raise ValueError("Every decision needs a nonempty suffix")
@@ -61,9 +74,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         raise ValueError("Decision IDs must be unique")
     started = time.perf_counter()
     encoded = [encode_prompt(tokenizer, row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
-    if not prefix or any(ids[: len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
-        raise ValueError("The fixed state prefix does not match every full prompt")
+    prefix = _fit_state_prefix(_state_prefix(tokenizer, rows[0]["state"]), encoded)
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
     if pad is None:
         raise ValueError("Tokenizer requires a padding or EOS token")

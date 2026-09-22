@@ -4,7 +4,23 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from semif_phase1.shared import _suffix_layout, score_shared  # noqa: E402
+from semif_phase1.shared import _fit_state_prefix, _suffix_layout, score_shared  # noqa: E402
+
+
+def test_state_prefix_backs_off_context_merged_json_token():
+    # Qwen tokenizes an isolated closing brace separately, but merges the same
+    # boundary into `}]` once the remainder of this structured prompt is added.
+    candidate = [10, 20, 92]
+    encoded = [
+        ([10, 20, 24634, 30], [1, 2], "first"),
+        ([10, 20, 24634, 40], [1, 2], "second"),
+    ]
+    assert _fit_state_prefix(candidate, encoded) == [10, 20]
+
+
+def test_state_prefix_requires_a_nonempty_common_prefix():
+    with pytest.raises(ValueError, match="nonempty fixed state prefix"):
+        _fit_state_prefix([10], [([20, 30], [1, 2], "prompt")])
 
 
 def test_suffix_padding_follows_real_tokens():

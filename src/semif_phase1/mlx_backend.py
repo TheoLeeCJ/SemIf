@@ -17,7 +17,7 @@ import time
 
 from .core import softmax
 from .direct import PROMPT_VERSION, encode_prompt
-from .shared import _state_prefix
+from .shared import _fit_state_prefix, _state_prefix
 
 
 DEFAULT_CACHE_LIMIT_MIB = 256
@@ -134,11 +134,6 @@ def _prefill(model, prefix):
     return cache
 
 
-def _check_prefix(prefix, encoded):
-    if not prefix or any(ids[:len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
-        raise ValueError("The fixed state prefix does not match every full prompt")
-
-
 class SerialPrefixScorer:
     """Reuse only the current exact state; never mutate the retained prefix."""
 
@@ -153,9 +148,8 @@ class SerialPrefixScorer:
         mx.synchronize()
         started = time.perf_counter()
         encoded = encode_prompt(self.tokenizer, row, self.max_tokens)
-        prefix = _state_prefix(self.tokenizer, row["state"])
+        prefix = _fit_state_prefix(_state_prefix(self.tokenizer, row["state"]), [encoded])
         hit = self.cache is not None and prefix == self.prefix
-        _check_prefix(prefix, [encoded])
         prefill_seconds = 0.0
         if not hit:
             self.cache = self.prefix = None
@@ -198,8 +192,7 @@ def score_shared(model, tokenizer, rows, metadata, max_tokens=4096):
     mx.synchronize()
     started = time.perf_counter()
     encoded = [encode_prompt(tokenizer, row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
-    _check_prefix(prefix, encoded)
+    prefix = _fit_state_prefix(_state_prefix(tokenizer, rows[0]["state"]), encoded)
     suffixes = [ids[len(prefix):] for ids, _, _ in encoded]
     lengths = [len(ids) for ids in suffixes]
     width = max(lengths)
