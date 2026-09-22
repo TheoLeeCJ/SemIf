@@ -23,6 +23,9 @@ def main() -> None:
     parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
     parser.add_argument("--llama-threads", type=int,
                         help="CPU threads for --backend llamacpp (default: all visible cores)")
+    parser.add_argument("--llama-gpu-layers", type=int,
+                        help="Layers --backend llamacpp offloads to the GPU (default: 0, none); "
+                             "needs a llama-cpp-python build with GPU support")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -49,6 +52,11 @@ def main() -> None:
             parser.error("--llama-threads requires --backend llamacpp")
         if args.llama_threads < 1:
             parser.error("--llama-threads must be positive")
+    if args.llama_gpu_layers is not None:
+        if args.backend != "llamacpp":
+            parser.error("--llama-gpu-layers requires --backend llamacpp")
+        if args.llama_gpu_layers < 0:
+            parser.error("--llama-gpu-layers must be nonnegative")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
     if args.backend == "llamacpp":
@@ -75,7 +83,8 @@ def main() -> None:
 
         model, tokenizer, metadata = llamacpp_backend.load_model(
             args.model, args.revision, args.gguf,
-            threads=args.llama_threads, context_tokens=args.max_tokens)
+            threads=args.llama_threads, context_tokens=args.max_tokens,
+            gpu_layers=args.llama_gpu_layers or 0)
         direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
                                   llamacpp_backend.score_shared)
     else:

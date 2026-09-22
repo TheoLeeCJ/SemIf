@@ -13,6 +13,8 @@ from semif_phase1.cli import main
     (["--mode", "direct", "--gguf", "x.gguf"], "--gguf requires --backend llamacpp"),
     (["--mode", "direct", "--llama-threads", "4"], "--llama-threads requires --backend llamacpp"),
     (["--mode", "direct", "--backend", "llamacpp", "--llama-threads", "0"], "must be positive"),
+    (["--mode", "direct", "--llama-gpu-layers", "99"], "--llama-gpu-layers requires --backend llamacpp"),
+    (["--mode", "direct", "--backend", "llamacpp", "--llama-gpu-layers", "-1"], "must be nonnegative"),
     (["--mode", "reranker", "--backend", "llamacpp", "--gguf", "x.gguf"], "reranker requires torch"),
     (["--mode", "direct", "--backend", "llamacpp"], "requires --gguf"),
     (["--mode", "direct", "--backend", "llamacpp", "--gguf", "missing.gguf"], "requires --gguf"),
@@ -31,8 +33,9 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
     import semif_phase1
 
     fake_backend = SimpleNamespace(
-        load_model=lambda source, revision, gguf, *, threads, context_tokens:
-            (None, None, {"gguf": str(gguf), "threads": threads, "context_tokens": context_tokens}),
+        load_model=lambda source, revision, gguf, *, threads, context_tokens, gpu_layers:
+            (None, None, {"gguf": str(gguf), "threads": threads, "context_tokens": context_tokens,
+                          "n_gpu_layers": gpu_layers}),
         score=lambda model, tokenizer, row, metadata, max_tokens: metadata,
         SerialPrefixScorer=None, score_shared=None,
     )
@@ -44,12 +47,13 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", [
         "semif-score", "--backend", "llamacpp", "--mode", "direct", "--model", "unused",
         "--revision", "unused", "--gguf", str(weights), "--llama-threads", "7",
-        "--input", str(source), "--output", str(output)])
+        "--llama-gpu-layers", "20", "--input", str(source), "--output", str(output)])
     main()
     record = json.loads(output.read_text())
     assert record["gguf"] == str(weights)
     assert record["threads"] == 7
     assert record["context_tokens"] == 4096
+    assert record["n_gpu_layers"] == 20
 
 
 def test_load_model_rejects_unpinned_remote_revision():
@@ -76,7 +80,7 @@ def test_engine_refuses_empty_decode():
         engine._decode([], 0, 0, False)
 
 
-def test_cpu_model_params_initialize_once_and_disable_offload(monkeypatch):
+def test_model_params_initialize_once_and_offload_only_what_is_asked(monkeypatch):
     from semif_phase1 import llamacpp_backend
 
     calls = []
@@ -85,10 +89,37 @@ def test_cpu_model_params_initialize_once_and_disable_offload(monkeypatch):
         llama_model_default_params=lambda: SimpleNamespace(n_gpu_layers=-1),
     )
     monkeypatch.setattr(llamacpp_backend, "_BACKEND_INITIALIZED", False)
-    first = llamacpp_backend._cpu_model_params(library)
-    second = llamacpp_backend._cpu_model_params(library)
+    first = llamacpp_backend._model_params(library)
+    second = llamacpp_backend._model_params(library, 20)
     assert calls == ["init"]
-    assert first.n_gpu_layers == second.n_gpu_layers == 0
+    assert first.n_gpu_layers == 0
+    assert second.n_gpu_layers == 20
+
+
+@pytest.mark.parametrize("layers", [-1, 1.5, True])
+def test_load_model_rejects_invalid_gpu_layers(tmp_path, layers):
+    from semif_phase1 import llamacpp_backend
+
+    weights = tmp_path / "model.gguf"
+    weights.write_bytes(b"gguf")
+    with pytest.raises(ValueError, match="gpu_layers"):
+        llamacpp_backend.load_model("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+                                    weights, gpu_layers=layers)
+
+
+def test_gpu_layers_on_a_cpu_only_build_fail_instead_of_scoring_on_the_cpu(tmp_path, monkeypatch):
+    from semif_phase1 import llamacpp_backend
+
+    weights = tmp_path / "model.gguf"
+    weights.write_bytes(b"gguf")
+    loaded = []
+    cpu_only = SimpleNamespace(llama_supports_gpu_offload=lambda: False,
+                               llama_model_load_from_file=lambda *args: loaded.append(args))
+    monkeypatch.setitem(sys.modules, "llama_cpp", cpu_only)
+    with pytest.raises(RuntimeError, match="GPU offload"):
+        llamacpp_backend.load_model("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+                                    weights, gpu_layers=20)
+    assert not loaded
 
 
 def test_restore_state_rejects_native_failure():
@@ -183,8 +214,9 @@ def test_real_gguf_scores_direct_serial_and_shared():
     revision = os.environ.get(
         "SEMIF_LLAMACPP_REVISION", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a")
     threads = int(os.environ.get("SEMIF_LLAMACPP_THREADS", "8"))
+    gpu_layers = int(os.environ.get("SEMIF_LLAMACPP_GPU_LAYERS", "0"))
     model, tokenizer, metadata = llamacpp_backend.load_model(
-        source, revision, os.environ["SEMIF_LLAMACPP_GGUF"], threads=threads)
+        source, revision, os.environ["SEMIF_LLAMACPP_GGUF"], threads=threads, gpu_layers=gpu_layers)
     state = "The deployment completed at 14:02 UTC. Health checks passed in all three zones."
     rows = [
         {
@@ -215,7 +247,7 @@ def test_real_gguf_scores_direct_serial_and_shared():
         for serial_result, shared_result in zip(serial, shared):
             numpy.testing.assert_allclose(serial_result["option_logits"], shared_result["option_logits"])
         assert metadata["backend"] == "llamacpp"
-        assert metadata["n_gpu_layers"] == 0
+        assert metadata["n_gpu_layers"] == gpu_layers
         assert metadata["max_prompt_tokens"] == 4096
         assert metadata["context_tokens"] >= metadata["max_prompt_tokens"]
     finally:
