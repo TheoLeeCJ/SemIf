@@ -1,0 +1,120 @@
+{
+  "version": "jev-api-compat-v1",
+  "status": "specification; not implemented",
+  "specification": "docs/JEV_API_COMPAT.md",
+  "target_interface": {
+    "vendor": "TypeSafe",
+    "endpoint": "POST /v1/systemone",
+    "models_endpoint": "GET /v1/models",
+    "reference_docs": "https://docs.typesafe.ai/api.md",
+    "docs_read_on": "2026-09-22",
+    "reference_model_id": "jev-1.13.0"
+  },
+  "affiliation": "none; independent reimplementation of a published interface",
+  "endpoints": [
+    "POST /v1/systemone",
+    "GET /v1/models",
+    "GET /healthz"
+  ],
+  "exact_contracts": [
+    "answer keys equal question keys",
+    "one answer per question",
+    "response model reports the SemIf model that answered",
+    "probabilities sum to 1 over declared options",
+    "probabilities, noul, score, and confidence serialize as JSON floats",
+    "prompt_sha256 equal to the equivalent semif-score JSONL row",
+    "no truncation; over-budget questions are rejected",
+    "pinned 40-character revision for remote models"
+  ],
+  "primitives": {
+    "noul": {
+      "options": 2,
+      "option_ids": ["true", "false"],
+      "answer_fields": ["type", "noul"],
+      "confidence": false,
+      "criteria_required": false,
+      "default_true_description": "The answer to the question is yes.",
+      "default_false_description": "The answer to the question is no."
+    },
+    "choice": {
+      "jev_option_range": [2, 255],
+      "semif_option_range": [2, 16],
+      "answer_fields": ["type", "choice", "probabilities", "confidence"],
+      "confidence": true,
+      "criteria_required": true,
+      "null_description_policy": "substitute the option key"
+    },
+    "score": {
+      "jev_level_range": [2, 10],
+      "semif_level_range": [2, 16],
+      "option_ids": "stringified 0-based level index",
+      "answer_fields": ["type", "score", "legend", "probabilities", "confidence"],
+      "score_formula": "sum(index * probability)",
+      "confidence": true,
+      "criteria_required": true
+    }
+  },
+  "confidence": {
+    "name": "normalized-peak-v1",
+    "formula": "clamp((n * max(p) - 1) / (n - 1), 0, 1)",
+    "source": "https://docs.typesafe.ai/confidence.md",
+    "caveat": "TypeSafe publishes this as the explainer's calculation and does not publish its production statistic verbatim; thresholds tuned against live Jev may not transfer"
+  },
+  "prompt_versions": {
+    "direct-options-v1": {
+      "slots": "ABCDEFGHIJKLMNOP",
+      "max_options": 16,
+      "default": true,
+      "evidence": "existing committed results"
+    },
+    "direct-options-v2": {
+      "slots": "A-Z then two-letter uppercase codes, frozen table",
+      "max_options": 255,
+      "default": false,
+      "evidence": "none; must not become the default before authored and perturbation workloads are re-run and committed"
+    }
+  },
+  "tokenizer_slot_capacity": {
+    "measured_against": "Qwen/Qwen3.5-4B@851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "measured_on": "2026-09-22",
+    "single_token_uppercase_letters": 26,
+    "single_token_digits": 10,
+    "single_token_two_letter_uppercase": 562,
+    "two_letter_candidates": 676
+  },
+  "routing": {
+    "one_question": "direct",
+    "many_questions": "shared",
+    "shared_prefix_rejected": "serial",
+    "serial_rejected": "direct",
+    "note": "reuse paths are numerically distinct from fresh scoring; pin with SEMIF_MODE when one fixed path is required"
+  },
+  "usage_accounting": {
+    "input_tokens_direct": "sum of per-row prompt tokens",
+    "input_tokens_shared": "prefix_tokens + sum(suffix_tokens)",
+    "output_tokens": 0,
+    "output_tokens_note": "no answer token is generated"
+  },
+  "error_statuses": [401, 404, 422, 500, 503],
+  "never_emitted": [429, 529],
+  "error_body_owner": "SemIf; TypeSafe does not publish an error body schema",
+  "defaults": {
+    "max_input_tokens": 4096,
+    "temperature": 1.0,
+    "host": "127.0.0.1",
+    "port": 8471,
+    "accept_jev_aliases": true
+  },
+  "temperature_policy": "default 1.0; the fitted per-workload values in docs/CALIBRATION.md are workload-specific and are not defaults",
+  "known_divergences": [
+    "Choice capped at 16 options in phase 1",
+    "4096-token default budget, not 64k/32k",
+    "usage.output_tokens is always 0",
+    "confidence formula may differ from Jev production",
+    "uncalibrated probabilities by default",
+    "SemIf prompt rendering, not Jev's",
+    "score ordinality carried only by level text and order",
+    "lower quality: 0.845 vs 0.883 on the aligned 102-row subset",
+    "no rate limiting"
+  ]
+}
