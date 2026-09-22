@@ -24,6 +24,13 @@ DEFAULT_CACHE_LIMIT_MIB = 256
 SUPPORTED_MODEL_TYPES = {"gemma4", "gemma4_unified", "muse_glimmer", "qwen3_5"}
 
 
+def clear_memory_cache():
+    """Return inactive MLX allocations after a service releases a model."""
+    import mlx.core as mx
+
+    mx.clear_cache()
+
+
 def load_model(source: str, revision: str, bits: int | None = None, *,
                cache_limit_mib: int = DEFAULT_CACHE_LIMIT_MIB):
     """Load a pinned checkpoint strictly; optional affine quantization is in memory.
