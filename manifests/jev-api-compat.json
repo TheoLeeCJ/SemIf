@@ -1,6 +1,6 @@
 {
   "version": "jev-api-compat-v1",
-  "status": "specification; not implemented",
+  "status": "implemented in src/semif_api/ except direct-options-v2 (see prompt_versions)",
   "specification": "docs/JEV_API_COMPAT.md",
   "target_interface": {
     "vendor": "TypeSafe",
@@ -29,26 +29,55 @@
   "primitives": {
     "noul": {
       "options": 2,
-      "option_ids": ["true", "false"],
-      "answer_fields": ["type", "noul"],
+      "option_ids": [
+        "true",
+        "false"
+      ],
+      "answer_fields": [
+        "type",
+        "noul"
+      ],
       "confidence": false,
       "criteria_required": false,
       "default_true_description": "The answer to the question is yes.",
       "default_false_description": "The answer to the question is no."
     },
     "choice": {
-      "jev_option_range": [2, 255],
-      "semif_option_range": [2, 16],
-      "answer_fields": ["type", "choice", "probabilities", "confidence"],
+      "jev_option_range": [
+        2,
+        255
+      ],
+      "semif_option_range": [
+        2,
+        16
+      ],
+      "answer_fields": [
+        "type",
+        "choice",
+        "probabilities",
+        "confidence"
+      ],
       "confidence": true,
       "criteria_required": true,
       "null_description_policy": "substitute the option key"
     },
     "score": {
-      "jev_level_range": [2, 10],
-      "semif_level_range": [2, 16],
+      "jev_level_range": [
+        2,
+        10
+      ],
+      "semif_level_range": [
+        2,
+        16
+      ],
       "option_ids": "stringified 0-based level index",
-      "answer_fields": ["type", "score", "legend", "probabilities", "confidence"],
+      "answer_fields": [
+        "type",
+        "score",
+        "legend",
+        "probabilities",
+        "confidence"
+      ],
       "score_formula": "sum(index * probability)",
       "confidence": true,
       "criteria_required": true
@@ -58,7 +87,24 @@
     "name": "normalized-peak-v1",
     "formula": "clamp((n * max(p) - 1) / (n - 1), 0, 1)",
     "source": "https://docs.typesafe.ai/confidence.md",
-    "caveat": "TypeSafe publishes this as the explainer's calculation and does not publish its production statistic verbatim; thresholds tuned against live Jev may not transfer"
+    "caveat": "TypeSafe publishes this as the explainer's calculation and does not publish its production statistic verbatim; thresholds tuned against live Jev may not transfer",
+    "published_examples": {
+      "note": "The formula does not reproduce the published digits exactly; both examples are consistent with it only under two-decimal display rounding.",
+      "choice": {
+        "shown_probabilities": [
+          0.88,
+          0.12,
+          0.0
+        ],
+        "shown_confidence": 0.81,
+        "formula_on_shown": 0.82
+      },
+      "score": {
+        "shown_peak": 0.95,
+        "shown_confidence": 0.92,
+        "formula_on_shown": 0.925
+      }
+    }
   },
   "prompt_versions": {
     "direct-options-v1": {
@@ -95,8 +141,17 @@
     "output_tokens": 0,
     "output_tokens_note": "no answer token is generated"
   },
-  "error_statuses": [401, 404, 422, 500, 503],
-  "never_emitted": [429, 529],
+  "error_statuses": [
+    401,
+    404,
+    422,
+    500,
+    503
+  ],
+  "never_emitted": [
+    429,
+    529
+  ],
   "error_body_owner": "SemIf; TypeSafe does not publish an error body schema",
   "defaults": {
     "max_input_tokens": 4096,
@@ -116,5 +171,11 @@
     "score ordinality carried only by level text and order",
     "lower quality: 0.845 vs 0.883 on the aligned 102-row subset",
     "no rate limiting"
-  ]
+  ],
+  "operator_guide": "docs/SERVE.md",
+  "sdk_notes": {
+    "score_key_type": "legend and probabilities keys are JSON strings on the wire; typesafe_sdk surfaces them as ints after parsing",
+    "validation": "validate responses with model_validate_json on raw bytes; model_validate on a parsed dict fails under the SDK's strict models",
+    "extension_fields": "typesafe_sdk response models use extra=ignore, so the semif block is safe for SDK clients"
+  }
 }

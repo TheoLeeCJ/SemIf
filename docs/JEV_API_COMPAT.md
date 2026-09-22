@@ -1,6 +1,7 @@
 # Jev-compatible API layer (`semif-serve`)
 
-> Specification. Nothing in this document is implemented yet.
+> **Status: implemented except section 5.2 phase 2.** `src/semif_api/` serves
+> Noul, Score, and Choice up to 16 options. Operator guide: [Serving](SERVE.md).
 
 SemIf scores one decision at a time from a JSONL file. TypeSafe's Jev is consumed
 over an HTTP endpoint with a different request shape, three question primitives,
@@ -326,6 +327,15 @@ Values are emitted as JSON floats. `typesafe_sdk`'s response models are
 rather than `0.0` fails SDK validation. The serializer must guarantee a decimal
 point on every probability, `noul`, `score`, and `confidence` value.
 
+Score `legend` and `probabilities` keys go on the wire as JSON strings, as the
+API reference specifies. `typesafe_sdk` declares them as integer-keyed mappings
+and relies on pydantic's JSON mode to coerce, so `ScoreAnswer.legend[0]` is the
+correct SDK-side access and `legend["0"]` is the correct wire-side one. A
+consequence worth knowing when writing conformance checks: validating a response
+with `model_validate` on an already-parsed `dict` fails, while
+`model_validate_json` on the raw bytes succeeds. The same applies to
+`ListModelsResponse.models`, which the SDK types as a tuple.
+
 ### 6.2 Temperature
 
 If a calibration temperature `T` is configured (§8), it is applied to the logits
@@ -348,10 +358,19 @@ confidence = clamp((n · max(p) − 1) / (n − 1), 0, 1)
 `semif-serve` uses exactly this. Two properties matter and both hold: an even
 split over `n` options gives `0.0`, and all mass on one option gives `1.0`.
 
+**The published examples do not reproduce digit for digit.** Applying the formula
+to the probabilities printed in the API reference gives 0.82 where the Choice
+example shows `confidence: 0.81`, and 0.925 where the Score example shows 0.92.
+Both are explained by two-decimal display rounding, but only inside a narrow
+band: a true peak near 0.8755 displays as 0.88 and yields 0.81, and one near
+0.9455 displays as 0.95 and yields 0.92. Those bands exist, so the formula is
+consistent with both examples — it is not confirmed by them. `tests/test_api_assemble.py`
+asserts the bands are non-empty rather than asserting the printed digits.
+
 The TypeSafe docs present this as the calculation used by their interactive
 explainer and describe `confidence` as "a statistic computed from the probability
-distribution" without publishing the server-side formula verbatim. It is possible
-that Jev's production statistic differs. The layer therefore reports
+distribution" without publishing the server-side formula verbatim. Jev's
+production statistic may differ. The layer therefore reports
 `semif.confidence_formula: "normalized-peak-v1"` on every Choice and Score answer
 so a consumer that has tuned thresholds against real Jev can tell which statistic
 produced a number. Full `probabilities` are always returned, so any consumer can
@@ -540,8 +559,9 @@ simply never triggered by them.
   and absent Noul criteria.
 - Hash equality: for each fixture, the row produced by the server and the same row
   written as JSONL produce the same `prompt_sha256` under a stub tokenizer.
-- Confidence: even split → 0.0; one-hot → 1.0; the docs' worked example
-  (`{0.88, 0.12, 0.0}` → 0.81) reproduces to two decimals.
+- Confidence: even split → 0.0; one-hot → 1.0; and for each published example, a
+  true peak exists that is consistent with both its printed probability and its
+  printed confidence under two-decimal rounding (§6.3).
 - Score: `Σ i·p_i` against the docs' example (`{0: 0.0, 1: 0.95, 2: 0.05}` → 1.05).
 - Every 422 case, asserting status, `code`, and `param`.
 - JSON serialization: no probability, `noul`, `score`, or `confidence` value
@@ -554,16 +574,20 @@ derived from the published API reference, and against `typesafe_sdk`'s own
 response models imported directly, so a future SDK release that tightens
 validation fails the suite rather than a user's application.
 
-**Live SDK round-trip.** A marked test starts the server with a small real model,
-points `typesafe_sdk` at it via `TYPESAFE_BASE_URL`, and asserts the three
-primitives return the SDK's typed objects with in-range values. Skipped when no
-weights are present, like the existing model-dependent tests.
+**Live SDK round-trip.** Two levels, because they catch different things.
+`tests/test_api_conformance.py` drives the real `AsyncTypeSafeClient` against the
+app over an in-process ASGI transport with a stub backend, so the SDK contract is
+checked on every run with no weights and no network.
+`tests/test_api_live.py` repeats the three primitives against real weights and is
+skipped unless `SEMIF_LIVE_MODEL` is set.
 
-**Equivalence to the CLI.** The authored-decisions fixture is scored twice — once
-through `semif-score --mode direct`, once through the server — and the
-probabilities must match within the tolerance the repo already uses for
-cross-path comparisons. Reported as committed evidence, not as a claim in the
-README.
+**Equivalence to the CLI.** Two levels again. Without weights, the rows the
+server builds and the equivalent JSONL rows must produce identical
+`direct_messages` output, which makes their prompt hashes equal under any
+tokenizer. With weights, `tests/test_api_live.py` asserts the server's
+`prompt_sha256` and probabilities match a direct scorer call on the same
+decision. A full authored-decisions fixture comparison belongs in `results/`
+as committed evidence, not as a claim in the README.
 
 **Score ordinality (required before Score is documented as usable).** On a
 labeled ordered workload, measure whether reversing level order reverses the
@@ -591,8 +615,9 @@ src/semif_api/
   schema/systemone.json
 tests/test_api_translate.py
 tests/test_api_assemble.py
+tests/test_api_runtime.py
 tests/test_api_conformance.py
-tests/test_api_live.py        # marked, weight-dependent
+tests/test_api_live.py        # weight-dependent, skipped without SEMIF_LIVE_MODEL
 manifests/jev-api-compat.json # machine-readable limits + conformance matrix
 ```
 
@@ -603,28 +628,30 @@ backend.
 New optional dependency group, so the default install is unchanged:
 
 ```toml
-serve = ["fastapi==...", "uvicorn==..."]
+serve = ["fastapi==0.122.0", "uvicorn==0.41.0", "httpx==0.28.1"]
 ```
 
 Pinned exactly, matching the repository's pinning convention. A stdlib
-`http.server` implementation is viable and dependency-free, but FastAPI's request
-validation and generated schema are worth the two pins for a layer whose entire
-job is conforming to someone else's schema.
+`http.server` implementation is viable and dependency-free, but FastAPI is worth
+the pins for a layer whose entire job is conforming to someone else's contract.
+`jsonschema` joins the `test` extra for the response-schema check.
 
 Order of work:
 
-1. `slots.py`, `translate.py`, `assemble.py` + their tests. No server, no model.
-2. `errors.py`, `app.py`, `runtime.py` with `direct` only.
-3. `shared`/`serial` routing and fallback reporting.
-4. Conformance schema and live SDK round-trip test.
-5. CLI-equivalence evidence run, committed under `results/` with checksums per
-   `AGENTS.md`.
-6. `docs/SERVE.md` (operator guide) and a README quick-start entry.
-7. Phase 2 slot alphabet, with its own benchmark run, behind `SEMIF_PROMPT_VERSION`.
+1. ✅ `slots.py`, `translate.py`, `assemble.py` + their tests. No server, no model.
+2. ✅ `errors.py`, `app.py`, `runtime.py`.
+3. ✅ `shared`/`serial` routing and fallback reporting.
+4. ✅ Conformance schema and SDK round-trip tests.
+5. ✅ `docs/SERVE.md` (operator guide) and a README quick-start entry.
+6. ⬜ CLI-equivalence evidence run over the authored fixture, committed under
+   `results/` with checksums per `AGENTS.md`.
+7. ⬜ Phase 2 slot alphabet, with its own benchmark run, behind `SEMIF_PROMPT_VERSION`.
+8. ⬜ The §12 Score-ordinality and option-order measurements.
 
-Steps 1–6 make the layer usable for Noul, Score, and Choice up to 16 options,
+Steps 1–5 make the layer usable for Noul, Score, and Choice up to 16 options,
 which covers every example in the TypeSafe docs except large-catalog
-classification.
+classification. Steps 6–8 are measurements, and until they exist the
+corresponding claims stay out of the README.
 
 ## 14. Known divergences from Jev
 
