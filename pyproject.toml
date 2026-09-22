@@ -26,6 +26,7 @@ semif-score = "semif_phase1.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+playground = ["typesafe-sdk==0.7.1"]
 mlx = [
   "mlx==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx-lm @ git+https://github.com/ml-explore/mlx-lm.git@a63e24c389382619eb6d9af656e3b46024be217a ; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -36,4 +37,4 @@ llamacpp = ["llama-cpp-python==0.3.35"]
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "webgpu-demo"]
+testpaths = ["tests", "webgpu-demo", "playground-demo"]

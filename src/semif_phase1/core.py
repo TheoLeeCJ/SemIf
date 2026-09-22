@@ -65,6 +65,27 @@ def softmax(values: list[float]) -> list[float]:
     return [weight / total for weight in weights]
 
 
+def normalized_entropy_confidence(probabilities: list[float]) -> float:
+    """Return declared-option concentration in [0, 1], not calibrated correctness.
+
+    Zero represents a uniform distribution and one represents all probability
+    mass on a single option. The input must be a normalized distribution over
+    at least two options.
+    """
+    if len(probabilities) < 2:
+        raise ValueError("Need at least two probabilities")
+    if any(
+        not math.isfinite(value) or not 0.0 <= value <= 1.0
+        for value in probabilities
+    ):
+        raise ValueError("Probabilities must be finite values between zero and one")
+    if not math.isclose(sum(probabilities), 1.0, rel_tol=1e-9, abs_tol=1e-9):
+        raise ValueError("Probabilities must sum to one")
+    entropy = -sum(value * math.log(value) for value in probabilities if value > 0.0)
+    confidence = 1.0 - entropy / math.log(len(probabilities))
+    return min(1.0, max(0.0, confidence))
+
+
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 

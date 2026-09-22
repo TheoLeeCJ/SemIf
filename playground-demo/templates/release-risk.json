@@ -1,0 +1,51 @@
+{
+  "id": "release-risk",
+  "name": "Release risk gate",
+  "category": "Engineering decisions",
+  "description": "Turn a deployment snapshot into an escalation decision and an ordered risk score.",
+  "state": {
+    "release": "2026.09.21-rc3",
+    "service": "checkout-api",
+    "change": "Replace the card-token retry queue",
+    "checks": {
+      "unit": "passed",
+      "integration": "passed",
+      "load_test": "p95 latency +18% against current production",
+      "rollback_rehearsal": "not run"
+    },
+    "observations": [
+      "No customer data migration",
+      "Retry traffic is 11% of checkout volume",
+      "On-call coverage begins 45 minutes after the proposed release window"
+    ]
+  },
+  "questions": {
+    "ship_decision": {
+      "type": "choice",
+      "instructions": "Choose the release disposition supported by the evidence.",
+      "criteria": {
+        "ship": "Proceed in the planned window without added controls",
+        "ship_with_guardrail": "Proceed only with a canary, rollback threshold, and active owner",
+        "hold": "Do not release until missing evidence or unacceptable risk is resolved"
+      }
+    },
+    "human_review_needed": {
+      "type": "noul",
+      "instructions": "A human release owner should review this deployment before it proceeds.",
+      "criteria": {
+        "true": "The evidence contains a material unresolved risk or missing release control.",
+        "false": "The evidence is complete and the remaining risk is routine."
+      }
+    },
+    "operational_risk": {
+      "type": "score",
+      "instructions": "Rate the operational risk of releasing in the proposed window.",
+      "criteria": [
+        "Low: routine change with complete evidence and immediate ownership",
+        "Moderate: bounded concern with a proven mitigation",
+        "High: material uncertainty or customer impact is plausible",
+        "Critical: likely severe impact or no safe rollback path"
+      ]
+    }
+  }
+}
