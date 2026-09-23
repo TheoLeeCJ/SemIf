@@ -177,7 +177,22 @@ well-calibrated than BF16; its fitted temperature is nearly the same.
 | llama.cpp Q4_K_M, RTX 3080 Laptop, `auto` | | | 10.51 | 18 / 777 |
 
 Decisions per second; state p50 for the GGUF: 14.97 s fresh, 2.28 s serial,
-1.93 s parallel. The two Torch rows on the laptop differ only by the Gated
+1.93 s parallel.
+
+What the table does not show is the line this PR starts from: the backend as
+merged in #18 runs on CPU only. Measured on the first 5 states of the fixture
+(105 decisions, backend functions timed directly because `shape777.py` takes
+only the full fixture; `results/raw/shape777-subset5-llamacpp-before-after.json`):
+
+| llama.cpp Q4_K_M, same laptop, 5 states | fresh | shared |
+|---|---:|---:|
+| before: CPU (16 threads), state restore — `#18` as merged | 0.05 | 0.49 |
+| after: GPU, state restore (`--llama-parallel 1`) | 1.45 | 9.86 |
+| after: GPU, fan-out (`--llama-parallel auto`) | 1.43 | 11.18 |
+
+The GPU offload is the gain — ×30 fresh, ×20 shared. The fan-out adds 13 % on
+this subset and 18 % on the full fixture. The GPU rows of the subset agree with
+the full-fixture rows above (9.21 / 10.88), so the subset is representative. The two Torch rows on the laptop differ only by the Gated
 DeltaNet kernels: `pip install -e .` leaves `transformers` on its reference
 PyTorch implementation (it says so at load time); with `flash-linear-attention`
 installed the delta rule runs in Triton. `causal_conv1d` needs `nvcc` and was

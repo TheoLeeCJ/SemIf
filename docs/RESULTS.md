@@ -101,6 +101,11 @@ claims above are unchanged. Qwen3.5-4B Q4_K_M (`bartowski/Qwen_Qwen3.5-4B-GGUF`,
 | shape777, parallel shared | decisions / s | 20.03 | 14.14 | 10.88 (8 branches) · 10.51 (auto) |
 | shape777, parallel vs fresh | argmax flips / 777 | 6 | 3 | 16–18 |
 
+Before this extension the llama.cpp backend ran on CPU only: 0.05 decisions
+per second fresh and 0.49 shared on the same laptop (5-state subset,
+`results/raw/shape777-subset5-llamacpp-before-after.json`); the GPU offload is
+what turns those into 1.40 and 10.88.
+
 The laptop BF16 column uses `flash-linear-attention` for the Gated DeltaNet
 delta rule; with the reference PyTorch kernels that `pip install -e .` leaves
 in place it reads 1.10 / 7.78 / 10.24 decisions per second
