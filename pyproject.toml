@@ -23,9 +23,13 @@ dependencies = [
 
 [project.scripts]
 semif-score = "semif_phase1.cli:main"
+semif-serve = "semif_api.app:main"
 
 [project.optional-dependencies]
-test = ["pytest==8.4.2"]
+test = ["pytest==8.4.2", "jsonschema==4.26.0"]
+serve = ["fastapi==0.122.0", "uvicorn==0.41.0", "httpx==0.28.1"]
+# The vendor SDK, used only to check that real clients accept our responses.
+conformance = ["typesafe-sdk==0.7.1"]
 mlx = [
   "mlx==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx-lm @ git+https://github.com/ml-explore/mlx-lm.git@a63e24c389382619eb6d9af656e3b46024be217a ; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -34,6 +38,9 @@ llamacpp = ["llama-cpp-python==0.3.35"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+semif_api = ["schema/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "webgpu-demo"]

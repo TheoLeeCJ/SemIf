@@ -28,6 +28,8 @@ This baseline reads typed option probabilities directly from a model. No answer 
 
 **2026-09-22**
 
+- Added `semif-serve`, a TypeSafe-compatible HTTP layer — see [Serving](docs/SERVE.md).
+
 - Added PyTorch/MPS scoring for Apple Silicon — [@dp-IED](https://github.com/dp-IED) in [#15](https://github.com/TheoLeeCJ/SemIf/pull/15).
 - Added a Qwen3.8-27B EXL3 bridge with corrected, committed evidence — [@jkyamog](https://github.com/jkyamog) in [#9](https://github.com/TheoLeeCJ/SemIf/pull/9).
 - Added per-workload temperature calibration and calibrated prediction outputs — [@samarthpatel24](https://github.com/samarthpatel24) in [#19](https://github.com/TheoLeeCJ/SemIf/pull/19).
@@ -82,6 +84,19 @@ CUDA_VISIBLE_DEVICES=0 semif-score \
 Each result contains typed option scores, timing, the exact model revision, and a prompt hash.
 
 If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
+
+**Prefer an HTTP endpoint?** `semif-serve` answers TypeSafe's `POST /v1/systemone`
+contract from a local SemIf backend, so an application written against the
+TypeSafe SDKs runs on an open model by changing one environment variable. Noul,
+Score, and Choice up to 16 options are supported; the mapping, the limits, and
+the divergences are in [Serving](docs/SERVE.md).
+
+```bash
+pip install -e '.[test,serve]'
+SEMIF_BACKEND=mlx SEMIF_MODEL=Qwen/Qwen3.5-4B \
+  SEMIF_REVISION=851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a semif-serve
+# then, in the application: TYPESAFE_BASE_URL=http://127.0.0.1:8471
+```
 
 ## How it works
 
@@ -189,6 +204,8 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
+- [Serving](docs/SERVE.md) — run SemIf behind a TypeSafe-compatible HTTP endpoint
+- [Jev API compatibility](docs/JEV_API_COMPAT.md) — the wire contract, the primitive mapping, and every known divergence
 - [Apple Silicon](docs/APPLE_SILICON.md) — MPS and optional MLX backends
 - [Calibration](docs/CALIBRATION.md) — fitted temperatures, out-of-fold evidence, and application
 - [EXL3 bridge](exl3-bridge/README.md) — quantized 27B runner and committed evidence

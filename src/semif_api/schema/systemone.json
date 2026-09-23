@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/TheoLeeCJ/SemIf/schema/systemone.json",
+  "title": "TypeSafe /v1/systemone response",
+  "description": "Derived from https://docs.typesafe.ai/api.md as published on 2026-09-22. SemIf extension fields are permitted because the official SDK response models ignore unknown keys.",
+  "type": "object",
+  "required": ["model", "answers", "usage"],
+  "properties": {
+    "model": {"type": "string", "minLength": 1},
+    "answers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/answer"}
+    },
+    "usage": {
+      "type": "object",
+      "required": ["input_tokens", "output_tokens"],
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "answer": {
+      "oneOf": [
+        {"$ref": "#/$defs/noulAnswer"},
+        {"$ref": "#/$defs/choiceAnswer"},
+        {"$ref": "#/$defs/scoreAnswer"}
+      ]
+    },
+    "noulAnswer": {
+      "type": "object",
+      "required": ["type", "noul"],
+      "properties": {
+        "type": {"const": "noul"},
+        "noul": {"$ref": "#/$defs/probability"},
+        "confidence": false
+      }
+    },
+    "choiceAnswer": {
+      "type": "object",
+      "required": ["type", "choice", "probabilities", "confidence"],
+      "properties": {
+        "type": {"const": "choice"},
+        "choice": {"type": "string", "minLength": 1},
+        "probabilities": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": {"$ref": "#/$defs/probability"}
+        },
+        "confidence": {"$ref": "#/$defs/probability"}
+      }
+    },
+    "scoreAnswer": {
+      "type": "object",
+      "required": ["type", "score", "legend", "probabilities", "confidence"],
+      "properties": {
+        "type": {"const": "score"},
+        "score": {"type": "number", "minimum": 0},
+        "legend": {
+          "type": "object",
+          "minProperties": 2,
+          "propertyNames": {"pattern": "^[0-9]+$"},
+          "additionalProperties": {"type": "string"}
+        },
+        "probabilities": {
+          "type": "object",
+          "minProperties": 2,
+          "propertyNames": {"pattern": "^[0-9]+$"},
+          "additionalProperties": {"$ref": "#/$defs/probability"}
+        },
+        "confidence": {"$ref": "#/$defs/probability"}
+      }
+    }
+  }
+}
