@@ -90,21 +90,32 @@
 
         <div class="inputs">
           <label>State<textarea id="state" rows="5">A customer says a password reset succeeded, but every login attempt still returns “account locked”. Two unlock emails were requested and neither arrived.</textarea></label>
-          <label>Question<input id="question" value="Which queue should handle this request?" /></label>
-          <fieldset><legend>Allowed options</legend>
-            <div id="option-list">
-              <label class="option-row"><b>A</b><input class="option" value="Account access support" /></label>
-              <label class="option-row"><b>B</b><input class="option" value="Billing support" /></label>
-              <label class="option-row"><b>C</b><input class="option" value="Close as resolved" /></label>
+          <div class="question-column">
+            <div id="question-list"></div>
+            <div class="question-actions">
+              <span id="question-count">1 / 5</span>
+              <button id="add-question" type="button"><span class="material-symbols-rounded" aria-hidden="true">add</span> add question</button>
             </div>
-            <div class="option-actions">
-              <button id="remove-option" type="button"><span class="material-symbols-rounded" aria-hidden="true">remove</span> remove</button>
-              <span id="option-count">3 / 20</span>
-              <button id="add-option" type="button"><span class="material-symbols-rounded" aria-hidden="true">add</span> add</button>
-            </div>
-          </fieldset>
+          </div>
         </div>
-        <p class="fine">Both paths receive the same decision. One reads option probabilities directly; the other asks the model to write its option probabilities as JSON text.</p>
+        <p class="fine">Both paths receive the same decision. One reads option probabilities directly; the other asks the model to write its option probabilities as JSON text. Add up to five questions about the same state; each question runs both paths in turn.</p>
+        <template id="question-template">
+          <div class="question-block">
+            <div class="question-head">
+              <b class="question-title">Question 1</b>
+              <button class="remove-question" type="button"><span class="material-symbols-rounded" aria-hidden="true">remove</span> remove question</button>
+            </div>
+            <input class="question" placeholder="Ask a question about the state" />
+            <fieldset><legend>Allowed options</legend>
+              <div class="option-list"></div>
+              <div class="option-actions">
+                <button class="remove-option" type="button"><span class="material-symbols-rounded" aria-hidden="true">remove</span> remove</button>
+                <span class="option-count">0 / 20</span>
+                <button class="add-option" type="button"><span class="material-symbols-rounded" aria-hidden="true">add</span> add</button>
+              </div>
+            </fieldset>
+          </div>
+        </template>
       </section>
 
       <section class="method-map" aria-label="The two decision paths">
@@ -117,6 +128,8 @@
           <div><small>write tokens</small><strong><i>{</i><i>options</i><i> + </i><i>probabilities</i><i>}</i></strong></div>
         </div>
       </section>
+
+      <nav id="question-tabs" class="question-tabs" role="tablist" aria-label="Results by question" hidden></nav>
 
       <section class="race" aria-label="Live comparison results">
         <article class="lane direct">

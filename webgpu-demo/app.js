@@ -38,11 +38,18 @@ const presets = {
 };
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 20;
-const optionList = $("#option-list");
-const addOptionButton = $("#add-option");
-const removeOptionButton = $("#remove-option");
+const MAX_QUESTIONS = 5;
+const questionList = $("#question-list");
+const questionTemplate = $("#question-template");
+const addQuestionButton = $("#add-question");
+const questionTabs = $("#question-tabs");
+const defaultRunNote = $("#run-note").textContent;
 const files = new Map();
 let ready = false;
+// One entry per question in the current run; questions run one at a time on the same worker.
+let runs = [];
+let activeRun = 0;
+let currentRun = -1;
 const isMobileDevice = navigator.userAgentData?.mobile === true
   || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
   || window.matchMedia("(max-width: 600px)").matches;
@@ -142,17 +149,105 @@ function renderDirect(data) {
   $("#direct-readouts").textContent = `${data.readouts} readout${data.readouts === 1 ? "" : "s"}`;
 }
 
-function resetResults() {
-  $("#direct-output").textContent = "running one forward pass…";
-  $("#direct-output").className = "output empty";
-  $("#generated-output").textContent = "waiting for direct readout…";
-  $("#generated-output").className = "output empty";
-  for (const id of ["#direct-total", "#direct-input", "#generation-ttft", "#generation-total", "#generation-input", "#generation-tokens"]) $(id).textContent = "—";
-  $("#direct-readouts").textContent = "—";
-  $("#ratio").textContent = "measuring…";
+const runStatusText = {
+  queued: "queued behind earlier questions",
+  error: "not completed",
+  skipped: "skipped after an earlier error",
+};
+
+function renderDirectLane(run) {
+  if (run.direct) {
+    renderDirect(run.direct);
+    return;
+  }
+  const output = $("#direct-output");
+  output.className = "output empty";
+  output.textContent = runStatusText[run.status] ?? "running one forward pass…";
+  for (const id of ["#direct-total", "#direct-input", "#direct-readouts"]) $(id).textContent = "—";
+}
+
+function renderGenerationLane(run) {
+  const output = $("#generated-output");
+  const generation = run.generation;
+  if (!generation) {
+    output.className = "output empty";
+    output.textContent = runStatusText[run.status] ?? (run.direct ? "reading the decision…" : "waiting for direct readout…");
+    for (const id of ["#generation-ttft", "#generation-total", "#generation-input", "#generation-tokens"]) $(id).textContent = "—";
+    return;
+  }
+  output.className = "output";
+  output.textContent = generation.done ? generation.generatedText || "(no visible text generated)" : generation.text;
+  $("#generation-ttft").textContent = generation.ttftMs != null ? seconds(generation.ttftMs) : generation.done ? "no token" : "—";
+  $("#generation-total").textContent = generation.done ? seconds(generation.generationMs) : "—";
+  $("#generation-input").textContent = generation.done ? `${generation.inputTokens} tok` : "—";
+  $("#generation-tokens").textContent = generation.tokens == null ? "—" : `${generation.tokens} tok`;
+}
+
+function renderVerdict(run) {
+  if (run.status !== "done") {
+    $("#ratio").textContent = run.status === "running" ? "measuring…" : run.status === "queued" ? "queued" : "not measured";
+    $("#run-note").textContent = defaultRunNote;
+    return;
+  }
+  const directMs = run.direct.totalMs;
+  const generationMs = run.generation.generationMs;
+  const scope = runs.length === 1 ? "Measured sequentially in this tab." : `Question ${runs.indexOf(run) + 1} of ${runs.length}, measured sequentially in this tab.`;
+  $("#ratio").textContent = `${(generationMs / directMs).toFixed(2)}× generation / direct`;
+  $("#run-note").textContent = `${scope} Direct: ${seconds(directMs)}. Generation: ${seconds(generationMs)}. Order is fixed and the model was warmed before both.`;
+}
+
+function renderTabs() {
+  questionTabs.hidden = runs.length < 2;
+  questionTabs.replaceChildren(...runs.map((run, index) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(index === activeRun));
+    tab.dataset.status = run.status;
+    tab.title = run.data.question;
+    const number = document.createElement("b");
+    number.textContent = `Q${index + 1}`;
+    const question = document.createElement("span");
+    question.textContent = run.data.question;
+    const status = document.createElement("small");
+    status.textContent = run.status;
+    tab.append(number, question, status);
+    tab.addEventListener("click", () => {
+      activeRun = index;
+      showRun();
+    });
+    return tab;
+  }));
+}
+
+function showRun() {
+  renderTabs();
+  const run = runs[activeRun];
+  renderDirectLane(run);
+  renderGenerationLane(run);
+  renderVerdict(run);
+}
+
+function startRun(index) {
+  currentRun = index;
+  activeRun = index;
+  runs[index].status = "running";
+  setSupport(runs.length === 1
+    ? "Running direct readout, then autoregressive generation…"
+    : `Question ${index + 1} of ${runs.length}: running direct readout, then autoregressive generation…`);
+  showRun();
+  worker.postMessage({ type: "compare", data: runs[index].data });
+}
+
+function finishRuns() {
+  currentRun = -1;
+  runButton.disabled = !ready;
+  runButton.innerHTML = '<span class="material-symbols-rounded" aria-hidden="true">replay</span> run again';
 }
 
 worker.addEventListener("message", ({ data }) => {
+  const run = runs[currentRun];
+  const isActive = currentRun === activeRun;
   switch (data.type) {
     case "progress":
       renderProgress(data.event);
@@ -178,33 +273,42 @@ worker.addEventListener("message", ({ data }) => {
       runButton.disabled = false;
       break;
     case "direct":
-      renderDirect(data);
-      $("#generated-output").textContent = "reading the decision…";
+      run.direct = data;
+      if (isActive) {
+        renderDirectLane(run);
+        renderGenerationLane(run);
+      }
       break;
     case "generation-start":
-      $("#generated-output").textContent = "";
-      $("#generated-output").classList.remove("empty");
+      run.generation = { text: "", ttftMs: null, tokens: null, done: false };
+      if (isActive) renderGenerationLane(run);
       break;
     case "generation-update":
-      $("#generated-output").textContent = data.text;
-      if (data.ttftMs != null) $("#generation-ttft").textContent = seconds(data.ttftMs);
-      $("#generation-tokens").textContent = `${data.tokens} tok`;
+      Object.assign(run.generation, { text: data.text, ttftMs: data.ttftMs, tokens: data.tokens });
+      if (isActive) renderGenerationLane(run);
       break;
     case "complete": {
-      $("#generated-output").textContent = data.generatedText || "(no visible text generated)";
-      $("#generation-ttft").textContent = data.ttftMs == null ? "no token" : seconds(data.ttftMs);
-      $("#generation-total").textContent = seconds(data.generationMs);
-      $("#generation-input").textContent = `${data.inputTokens} tok`;
-      $("#generation-tokens").textContent = `${data.generatedTokens} tok`;
-      $("#ratio").textContent = `${(data.generationMs / data.directMs).toFixed(2)}× generation / direct`;
-      $("#run-note").textContent = `Measured sequentially in this tab. Direct: ${seconds(data.directMs)}. Generation: ${seconds(data.generationMs)}. Order is fixed and the model was warmed before both.`;
-      setSupport("Comparison complete. Edit the decision and run again whenever you like.", "ok");
-      runButton.disabled = false;
-      runButton.innerHTML = '<span class="material-symbols-rounded" aria-hidden="true">replay</span> run again';
+      Object.assign(run.generation, data, { tokens: data.generatedTokens, done: true });
+      run.status = "done";
+      if (currentRun + 1 < runs.length) {
+        startRun(currentRun + 1);
+        break;
+      }
+      showRun();
+      setSupport(runs.length === 1
+        ? "Comparison complete. Edit the decision and run again whenever you like."
+        : `All ${runs.length} questions complete. Pick a question above the results to compare, then edit and run again whenever you like.`, "ok");
+      finishRuns();
       break;
     }
     case "error":
       setSupport(data.message, "error");
+      if (run) {
+        run.status = "error";
+        runs.slice(currentRun + 1).forEach((queued) => { queued.status = "skipped"; });
+        showRun();
+        finishRuns();
+      }
       runButton.disabled = !ready;
       loadButton.disabled = ready;
       modelSelect.disabled = ready;
@@ -220,20 +324,24 @@ worker.addEventListener("error", (event) => {
   loadButton.disabled = false;
 });
 
-function optionRows() {
-  return [...optionList.querySelectorAll(".option-row")];
+function questionBlocks() {
+  return [...questionList.querySelectorAll(".question-block")];
 }
 
-function syncOptionControls() {
-  const rows = optionRows();
+function optionRows(block) {
+  return [...block.querySelectorAll(".option-row")];
+}
+
+function syncOptionControls(block) {
+  const rows = optionRows(block);
   rows.forEach((row, index) => { row.querySelector("b").textContent = String.fromCharCode(65 + index); });
-  $("#option-count").textContent = `${rows.length} / ${MAX_OPTIONS}`;
-  removeOptionButton.disabled = rows.length <= MIN_OPTIONS;
-  addOptionButton.disabled = rows.length >= MAX_OPTIONS;
+  block.querySelector(".option-count").textContent = `${rows.length} / ${MAX_OPTIONS}`;
+  block.querySelector(".remove-option").disabled = rows.length <= MIN_OPTIONS;
+  block.querySelector(".add-option").disabled = rows.length >= MAX_OPTIONS;
 }
 
-function appendOption(value = "") {
-  if (optionRows().length >= MAX_OPTIONS) return;
+function appendOption(block, value = "") {
+  if (optionRows(block).length >= MAX_OPTIONS) return;
   const row = document.createElement("label");
   row.className = "option-row";
   const label = document.createElement("b");
@@ -242,25 +350,51 @@ function appendOption(value = "") {
   input.value = value;
   input.placeholder = "Describe this option";
   row.append(label, input);
-  optionList.append(row);
-  syncOptionControls();
+  block.querySelector(".option-list").append(row);
+  syncOptionControls(block);
   return input;
 }
 
-function setOptions(values) {
-  while (optionRows().length > values.length) optionRows().at(-1).remove();
-  while (optionRows().length < values.length) appendOption();
-  optionRows().forEach((row, index) => { row.querySelector(".option").value = values[index]; });
-  syncOptionControls();
+function syncQuestionControls() {
+  const blocks = questionBlocks();
+  blocks.forEach((block, index) => {
+    const title = `Question ${index + 1}`;
+    block.querySelector(".question-title").textContent = title;
+    block.querySelector(".question").setAttribute("aria-label", title);
+    block.querySelector(".remove-question").disabled = blocks.length <= 1;
+  });
+  $("#question-count").textContent = `${blocks.length} / ${MAX_QUESTIONS}`;
+  addQuestionButton.disabled = blocks.length >= MAX_QUESTIONS;
 }
 
-addOptionButton.addEventListener("click", () => appendOption()?.focus());
-removeOptionButton.addEventListener("click", () => {
-  const rows = optionRows();
-  if (rows.length > MIN_OPTIONS) rows.at(-1).remove();
-  syncOptionControls();
-});
-syncOptionControls();
+function appendQuestion(question = "", options = ["", ""]) {
+  if (questionBlocks().length >= MAX_QUESTIONS) return;
+  const block = questionTemplate.content.firstElementChild.cloneNode(true);
+  block.querySelector(".question").value = question;
+  options.forEach((option) => appendOption(block, option));
+  block.querySelector(".add-option").addEventListener("click", () => appendOption(block)?.focus());
+  block.querySelector(".remove-option").addEventListener("click", () => {
+    const rows = optionRows(block);
+    if (rows.length > MIN_OPTIONS) rows.at(-1).remove();
+    syncOptionControls(block);
+  });
+  block.querySelector(".remove-question").addEventListener("click", () => {
+    if (questionBlocks().length <= 1) return;
+    block.remove();
+    syncQuestionControls();
+  });
+  questionList.append(block);
+  syncQuestionControls();
+  return block;
+}
+
+function setQuestions(questions) {
+  questionBlocks().forEach((block) => block.remove());
+  questions.forEach(({ question, options }) => appendQuestion(question, options));
+}
+
+addQuestionButton.addEventListener("click", () => appendQuestion()?.querySelector(".question").focus());
+setQuestions([presets.account]);
 
 async function checkWebGPU() {
   if (!navigator.gpu) {
@@ -295,8 +429,7 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
     const preset = presets[button.dataset.preset];
     if (!preset) return;
     $("#state").value = preset.state;
-    $("#question").value = preset.question;
-    setOptions(preset.options);
+    setQuestions([preset]);
     $("#state").focus();
   });
 });
@@ -310,17 +443,18 @@ renderSelectedModel();
 
 runButton.addEventListener("click", () => {
   const state = $("#state").value.trim();
-  const question = $("#question").value.trim();
-  const options = [...document.querySelectorAll(".option")].map((input) => input.value.trim());
-  if (!state || !question || options.some((option) => !option)) {
-    setSupport("State, question and every option must be nonempty.", "error");
+  const questions = questionBlocks().map((block) => ({
+    question: block.querySelector(".question").value.trim(),
+    options: [...block.querySelectorAll(".option")].map((input) => input.value.trim()),
+  }));
+  if (!state || questions.some(({ question, options }) => !question || options.some((option) => !option))) {
+    setSupport("State, every question and every option must be nonempty.", "error");
     return;
   }
-  resetResults();
+  runs = questions.map((question) => ({ data: { state, ...question }, status: "queued", direct: null, generation: null }));
   runButton.disabled = true;
   runButton.innerHTML = '<span class="material-symbols-rounded spin" aria-hidden="true">progress_activity</span> running…';
-  setSupport("Running direct readout, then autoregressive generation…");
-  worker.postMessage({ type: "compare", data: { state, question, options } });
+  startRun(0);
 });
 
 checkWebGPU().catch((error) => setSupport(`WebGPU check failed: ${error.message}`, "error"));
