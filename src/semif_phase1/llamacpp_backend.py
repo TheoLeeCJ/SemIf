@@ -34,14 +34,14 @@ DECODE_CHUNK = 512
 _BACKEND_INITIALIZED = False
 
 
-def _cpu_model_params(library):
-    """Initialize llama.cpp once and return model parameters with GPU offload disabled."""
+def _model_params(library, gpu_layers: int = 0):
+    """Initialize llama.cpp once and return model parameters offloading exactly `gpu_layers` layers."""
     global _BACKEND_INITIALIZED
     if not _BACKEND_INITIALIZED:
         library.llama_backend_init()
         _BACKEND_INITIALIZED = True
     params = library.llama_model_default_params()
-    params.n_gpu_layers = 0
+    params.n_gpu_layers = gpu_layers
     return params
 
 
@@ -208,8 +208,12 @@ def _verify_vocabulary(tokenizer, library, vocab) -> None:
 
 
 def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
-               context_tokens: int = 4096):
-    """Load one pinned reference tokenizer plus a local GGUF checkpoint for CPU scoring."""
+               context_tokens: int = 4096, gpu_layers: int = 0):
+    """Load one pinned reference tokenizer plus a local GGUF checkpoint.
+
+    Every layer stays in host memory unless `gpu_layers` asks llama.cpp to
+    offload some, which needs a llama-cpp-python build with GPU support.
+    """
     local = Path(source).is_dir()
     if not local and not re.fullmatch(r"[0-9a-f]{40}", revision or ""):
         raise ValueError("Remote sources require a pinned 40-character revision; local sources require a revision label")
@@ -224,11 +228,17 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         threads = os.cpu_count() or 4
     if not (isinstance(threads, int) and threads >= 1):
         raise ValueError("threads must be a positive integer")
+    if not (isinstance(gpu_layers, int) and not isinstance(gpu_layers, bool) and gpu_layers >= 0):
+        raise ValueError("gpu_layers must be a non-negative integer")
     import transformers
     try:
         import llama_cpp
     except ImportError as error:
         raise RuntimeError("Install the llama.cpp extra: pip install -e '.[test,llamacpp]'") from error
+    if gpu_layers and not llama_cpp.llama_supports_gpu_offload():
+        raise RuntimeError("gpu_layers needs a llama-cpp-python build with GPU offload, for example "
+                           "CMAKE_ARGS='-DGGML_CUDA=on' pip install --no-binary llama-cpp-python "
+                           "llama-cpp-python; this build would silently score on the CPU")
 
     offline = bool(os.environ.get("HF_HUB_OFFLINE"))
     common = {"revision": None if local else revision,
@@ -241,7 +251,7 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
             checksum.update(block)
     gguf_record = {"file": gguf.name, "bytes": gguf.stat().st_size,
                    "sha256": checksum.hexdigest()}
-    model_params = _cpu_model_params(llama_cpp)
+    model_params = _model_params(llama_cpp, gpu_layers)
     model = llama_cpp.llama_model_load_from_file(str(gguf).encode("utf-8"), model_params)
     if not model:
         raise RuntimeError(f"llama.cpp failed to load the GGUF checkpoint: {gguf}")
@@ -263,7 +273,7 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         "gguf": gguf_record,
         "vocab_size": engine.vocab_size,
         "threads": threads,
-        "n_gpu_layers": 0,
+        "n_gpu_layers": gpu_layers,
         "max_prompt_tokens": context_tokens,
         "context_tokens": engine.context_tokens,
         "decode_chunk": DECODE_CHUNK,

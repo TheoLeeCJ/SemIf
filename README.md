@@ -58,7 +58,13 @@ pip install -e '.[test]'
 checkpoint with no CUDA device. Install `pip install -e '.[test,llamacpp]'`,
 fetch a GGUF (for example `Qwen_Qwen3.5-4B-Q4_K_M.gguf` from
 `bartowski/Qwen_Qwen3.5-4B-GGUF`), and add `--backend llamacpp --gguf
-/path/to/model.gguf`; `--llama-threads` caps the CPU threads. Prompt
+/path/to/model.gguf`; `--llama-threads` caps the CPU threads. With a
+llama-cpp-python built for a GPU (for CUDA, `CMAKE_ARGS="-DGGML_CUDA=on" pip
+install --no-binary llama-cpp-python llama-cpp-python==0.3.35`),
+`--llama-gpu-layers N` offloads N layers. The default 0 keeps every layer in
+host memory, though a GPU build may still run the prompt's large matrix
+products on the GPU; a build without GPU support refuses a nonzero value
+instead of scoring on the CPU. The layer count is recorded with each score. Prompt
 construction stays on the pinned reference tokenizer, so `prompt_sha256`
 matches the Torch backend row for row; scores carry the GGUF checksum and are
 conditional on the quantized weights. Direct and prefix-cached execution can
