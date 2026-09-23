@@ -1,0 +1,10 @@
+{
+  "schema": "semif-playground-template-index-v1",
+  "templates": [
+    { "file": "resume-screening.json" },
+    { "file": "support-agent-audit.json" },
+    { "file": "llm-guardrails.json" },
+    { "file": "ticket-triage.json" },
+    { "file": "release-risk.json" }
+  ]
+}

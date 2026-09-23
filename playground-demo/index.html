@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <title>SemIf decision workbench</title>
+    <link rel="stylesheet" href="vendor/codemirror-5.65.21/lib/codemirror.css">
+    <link rel="stylesheet" href="vendor/codemirror-5.65.21/addon/fold/foldgutter.css">
+    <link rel="stylesheet" href="style.css?v=20260922-3">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="SemIf decision workbench">
+        <span class="slash-mark brand-mark" aria-hidden="true"><i></i><i></i></span>
+        <span>SemIf</span>
+        <span class="crumb">decision workbench</span>
+      </div>
+
+      <div class="template-picker">
+        <span class="template-picker-label">Use case</span>
+        <div class="use-case-select">
+          <label class="sr-only" for="template-select">Choose a use case template</label>
+          <select id="template-select" class="template-select-native" tabindex="-1" aria-hidden="true">
+            <option value="">Loading templates…</option>
+          </select>
+          <button
+            class="use-case-trigger"
+            id="template-trigger"
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="template-listbox"
+          >
+            <span id="template-trigger-label">Loading templates…</span>
+          </button>
+          <div class="use-case-popover" id="template-popover" hidden>
+            <div
+              class="use-case-listbox"
+              id="template-listbox"
+              role="listbox"
+              tabindex="-1"
+              aria-label="Use case templates"
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="service-strip" aria-label="Service status">
+        <button class="service-chip local" id="local-status" type="button" title="Open setup">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="service-chip-label">Local MLX · checking</span>
+        </button>
+        <button class="service-chip bocha" id="bocha-status" type="button" title="Open setup">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="service-chip-label">Jev Bocha · checking</span>
+        </button>
+        <button class="service-chip jev" id="jev-status" type="button" title="Open setup">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="service-chip-label">Jev official · checking</span>
+        </button>
+        <button class="icon-button" id="template-toggle" type="button" title="Open template studio" aria-controls="template-studio" aria-expanded="false">
+          Templates
+        </button>
+        <button class="icon-button" id="settings-open" type="button">Setup</button>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <section class="input-pane" aria-label="Request input">
+        <article class="editor-panel state-panel">
+          <header class="panel-heading">
+            <div>
+              <h1>State</h1>
+              <p>JSON evidence shared by every question</p>
+            </div>
+            <div class="panel-heading-tools">
+              <span class="editor-meta" id="state-meta">—</span>
+              <div class="json-tree-actions" role="group" aria-label="State fold actions">
+                <button class="json-tree-action" type="button" data-json-target="state" data-json-action="unfold" title="Unfold all State JSON" aria-label="Unfold all State JSON">+</button>
+                <button class="json-tree-action" type="button" data-json-target="state" data-json-action="fold" title="Fold all State JSON" aria-label="Fold all State JSON">−</button>
+              </div>
+            </div>
+          </header>
+          <label class="sr-only" for="state-editor">State JSON</label>
+          <div class="json-editor-shell" id="state-editor-shell">
+            <textarea id="state-editor" class="code-editor" spellcheck="false" aria-describedby="state-error"></textarea>
+          </div>
+          <p class="field-error" id="state-error" aria-live="polite"></p>
+        </article>
+
+        <div
+          class="editor-resizer"
+          id="editor-resizer"
+          role="separator"
+          aria-label="Resize State and Questions panels"
+          aria-orientation="horizontal"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="50"
+          tabindex="0"
+        ></div>
+
+        <article class="editor-panel questions-panel">
+          <header class="panel-heading">
+            <div>
+              <h2>Questions</h2>
+              <p>Noul, Choice, and Score dimensions</p>
+            </div>
+            <div class="panel-heading-tools">
+              <span class="editor-meta" id="questions-meta">—</span>
+              <div class="json-tree-actions" role="group" aria-label="Questions fold actions">
+                <button class="json-tree-action" type="button" data-json-target="questions" data-json-action="unfold" title="Unfold all Questions JSON" aria-label="Unfold all Questions JSON">+</button>
+                <button class="json-tree-action" type="button" data-json-target="questions" data-json-action="fold" title="Fold all Questions JSON" aria-label="Fold all Questions JSON">−</button>
+              </div>
+            </div>
+          </header>
+          <label class="sr-only" for="questions-editor">Questions JSON</label>
+          <div class="json-editor-shell" id="questions-editor-shell">
+            <textarea id="questions-editor" class="code-editor" spellcheck="false" aria-describedby="questions-error"></textarea>
+          </div>
+          <p class="field-error" id="questions-error" aria-live="polite"></p>
+        </article>
+      </section>
+
+      <div
+        class="workbench-resizer"
+        id="workbench-resizer"
+        role="separator"
+        aria-label="Resize request and response panels"
+        aria-orientation="vertical"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="47"
+        tabindex="0"
+      ></div>
+
+      <section class="response-pane" aria-label="Model responses">
+        <header class="response-header">
+          <div>
+            <h2>Response</h2>
+            <p id="response-summary">Choose a challenger to compare with Jev official.</p>
+          </div>
+          <div class="view-tabs" role="tablist" aria-label="Response view">
+            <button class="tab active" type="button" role="tab" aria-selected="true" data-view="compare">Compare</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="rendered">Rendered</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" data-view="raw">Raw JSON</button>
+          </div>
+        </header>
+
+        <div class="response-body">
+          <section class="response-alert" id="response-alert" role="alert" aria-live="polite" hidden>
+            <span class="response-alert-mark" aria-hidden="true">!</span>
+            <div class="response-alert-copy">
+              <strong id="response-alert-title"></strong>
+              <p id="response-alert-message"></p>
+              <div class="response-alert-actions" id="response-alert-actions" aria-label="Recovery suggestions"></div>
+            </div>
+          </section>
+
+          <section class="response-view active" id="view-compare" role="tabpanel">
+            <div class="empty-state" id="comparison-empty">
+              <div class="slash-mark empty-mark" aria-hidden="true"><i></i><i></i></div>
+              <h3>One state. Two readouts.</h3>
+              <p>Choose Local MLX or Jev Bocha, then compare it with Jev official.</p>
+            </div>
+            <div class="table-wrap" id="comparison-wrap" hidden>
+              <table class="comparison-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Dimension</th>
+                    <th scope="col" class="challenger-head local-head" id="challenger-head"><span></span>Local MLX · 4B</th>
+                    <th scope="col" class="jev-head"><span></span>Jev official</th>
+                    <th scope="col">Comparison</th>
+                  </tr>
+                </thead>
+                <tbody id="comparison-body"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="response-view" id="view-rendered" role="tabpanel" hidden>
+            <div class="rendered-list" id="rendered-list"></div>
+          </section>
+
+          <section class="response-view raw-view" id="view-raw" role="tabpanel" hidden>
+            <header class="raw-toolbar">
+              <div class="json-mode-tabs raw-mode-tabs" role="tablist" aria-label="Raw request and response">
+                <button class="json-mode-button raw-mode-button" id="raw-request-tab" type="button" role="tab" aria-selected="false" aria-controls="raw-request" data-raw-mode="request">Request</button>
+                <button class="json-mode-button raw-mode-button active" id="raw-response-tab" type="button" role="tab" aria-selected="true" aria-controls="raw-json" data-raw-mode="response">Response</button>
+              </div>
+              <span class="raw-context-label" id="raw-context-label">Response JSON</span>
+              <div class="raw-toolbar-actions">
+                <div class="json-tree-actions" id="raw-tree-actions" role="group" aria-label="Response tree actions">
+                  <button id="raw-expand-all" class="json-tree-action" type="button" title="Expand all Response JSON" aria-label="Expand all Response JSON">+</button>
+                  <button id="raw-collapse-all" class="json-tree-action" type="button" title="Collapse all Response JSON" aria-label="Collapse all Response JSON">−</button>
+                </div>
+                <button id="copy-json" class="quiet-button raw-copy-button" type="button">Copy JSON</button>
+              </div>
+            </header>
+            <div class="raw-request" id="raw-request" role="tabpanel" aria-labelledby="raw-request-tab" hidden>
+              <pre class="raw-curl"><code id="raw-curl">Run a comparison to generate cURL.</code></pre>
+            </div>
+            <div class="json-tree raw-json-tree" id="raw-json" role="tabpanel" aria-labelledby="raw-response-tab" tabindex="0"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <section class="template-studio" id="template-studio" hidden aria-labelledby="template-studio-title">
+      <header>
+        <div>
+          <h2 id="template-studio-title">Template studio</h2>
+          <p>Package the current state and questions as a repeatable use case.</p>
+        </div>
+        <button class="icon-button" id="template-close" type="button">Close</button>
+      </header>
+      <div class="studio-fields">
+        <label>
+          <span>Name</span>
+          <input id="template-name" type="text" maxlength="80" placeholder="Support agent audit">
+        </label>
+        <label>
+          <span>Category</span>
+          <input id="template-category" type="text" maxlength="60" placeholder="Real-life use cases">
+        </label>
+        <label class="wide-field">
+          <span>Description</span>
+          <input id="template-description" type="text" maxlength="180" placeholder="What this use case is designed to test">
+        </label>
+      </div>
+      <div class="studio-note">
+        <p><strong>Shareable templates</strong> are JSON files in <code>playground-demo/templates/</code>. Browser drafts stay on this device.</p>
+        <span id="template-draft-status">No unsaved template draft.</span>
+      </div>
+      <div class="studio-actions">
+        <label class="quiet-button file-button">
+          Import JSON
+          <input id="template-import" type="file" accept="application/json,.json">
+        </label>
+        <button class="quiet-button" id="template-download" type="button">Download template</button>
+        <button class="primary-button" id="template-save" type="button">Save in this browser</button>
+      </div>
+    </section>
+
+    <footer class="runbar">
+      <div class="target-controls" role="radiogroup" aria-label="Choose a challenger to compare with Jev official">
+        <span>Compare</span>
+        <label class="target-toggle local">
+          <input id="challenger-local" name="challenger" type="radio" value="local" checked>
+          <span id="local-target-label">Local MLX · 4B</span>
+        </label>
+        <label class="target-toggle bocha">
+          <input id="challenger-bocha" name="challenger" type="radio" value="bocha">
+          <span>Jev Bocha</span>
+        </label>
+        <span class="baseline-lock">against <strong>Jev official</strong></span>
+      </div>
+      <div class="run-status" id="run-status" role="status" aria-live="polite">Ready to validate the request.</div>
+      <button class="run-button" id="run-request" type="button">
+        Run comparison
+        <kbd>⌘↵</kbd>
+      </button>
+    </footer>
+
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
+      <form method="dialog" class="dialog-shell">
+        <header class="drawer-header">
+          <div class="drawer-heading">
+            <span class="drawer-eyebrow">Configuration</span>
+            <h2 id="settings-title">Local service setup</h2>
+            <p id="settings-description">Models, providers, and process-only credentials.</p>
+          </div>
+          <button class="dialog-close" type="submit" value="cancel" aria-label="Close setup"><span aria-hidden="true">×</span></button>
+        </header>
+
+        <div class="drawer-body">
+          <section class="setup-section local-setup">
+            <div class="setup-title">
+              <span class="model-rail local" aria-hidden="true"></span>
+              <div>
+                <h3>Shared local model</h3>
+                <p>One MLX checkpoint shared by every playground page.</p>
+              </div>
+            </div>
+            <div class="model-control-card">
+              <label class="model-picker-field" for="local-model-select">
+                <span class="field-heading">
+                  <span>Model checkpoint</span>
+                  <span class="field-badge" id="local-model-size">Loading…</span>
+                </span>
+                <span class="select-shell">
+                  <select id="local-model-select" aria-describedby="local-model-note"></select>
+                </span>
+              </label>
+              <p class="model-picker-note" id="local-model-note">Loading model options…</p>
+              <button class="primary-button setup-primary load-model-button" id="load-model" type="button">Load shared model</button>
+            </div>
+            <dl class="setup-facts" id="local-facts">
+              <div><dt>Status</dt><dd>Checking…</dd></div>
+            </dl>
+          </section>
+
+          <section class="setup-section bocha-setup">
+            <div class="setup-title">
+              <span class="model-rail bocha" aria-hidden="true"></span>
+              <div>
+                <h3>Jev Bocha</h3>
+                <p>TypeSafe SDK through Bocha's Jev-compatible endpoint.</p>
+              </div>
+            </div>
+            <div class="connection-summary">
+              <span class="connection-indicator" id="bocha-connection-indicator" aria-hidden="true"></span>
+              <div>
+                <span>Connection</span>
+                <strong id="bocha-connection-label">Checking…</strong>
+              </div>
+              <span class="privacy-badge">Memory only</span>
+            </div>
+            <div class="provider-fields">
+              <label class="field-group field-wide" for="bocha-api-key">
+                <span class="field-heading"><span>API key</span><span class="field-badge">Required</span></span>
+                <input id="bocha-api-key" type="password" maxlength="512" autocomplete="off" spellcheck="false" placeholder="Paste the Bocha API key">
+                <small>Held only by this loopback server until the process stops.</small>
+              </label>
+              <label class="field-group" for="bocha-base-url">
+                <span class="field-heading"><span>Base URL</span><span class="field-badge">Fixed</span></span>
+                <input id="bocha-base-url" type="url" maxlength="200" spellcheck="false" value="https://jev.bocha.cn" readonly>
+              </label>
+              <label class="field-group" for="bocha-model">
+                <span class="field-heading"><span>Model alias</span></span>
+                <input id="bocha-model" type="text" maxlength="128" spellcheck="false" value="bocha-jev-v1">
+              </label>
+            </div>
+            <div class="provider-note">
+              <strong>Process-only credential</strong>
+              <p id="bocha-setup-status">The key field clears after saving and is never written to browser storage.</p>
+            </div>
+            <dl class="setup-facts provider-facts" id="bocha-facts">
+              <div><dt>SDK</dt><dd>Checking…</dd></div>
+            </dl>
+            <div class="setup-actions">
+              <a href="https://bocha-ai.feishu.cn/wiki/PhrPwCrEaiCyyPkkDNecdfRSnHR" target="_blank" rel="noreferrer">Integration guide ↗</a>
+              <button class="primary-button setup-primary" id="save-bocha-config" type="button">Save Bocha settings</button>
+            </div>
+          </section>
+
+          <section class="setup-section jev-setup">
+            <div class="setup-title">
+              <span class="model-rail jev" aria-hidden="true"></span>
+              <div>
+                <h3>Jev official</h3>
+                <p>The official Python SDK reads its key from the server environment.</p>
+              </div>
+            </div>
+            <pre class="setup-command"><code>export TYPESAFE_API_KEY="your-key"
+python playground-demo/server.py</code></pre>
+            <dl class="setup-facts" id="jev-facts">
+              <div><dt>SDK</dt><dd>Checking…</dd></div>
+            </dl>
+            <a href="https://docs.typesafe.ai/introduction/quickstart" target="_blank" rel="noreferrer">Official quickstart ↗</a>
+          </section>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script src="vendor/codemirror-5.65.21/lib/codemirror.js"></script>
+    <script src="vendor/codemirror-5.65.21/mode/javascript/javascript.js"></script>
+    <script src="vendor/codemirror-5.65.21/addon/edit/matchbrackets.js"></script>
+    <script src="vendor/codemirror-5.65.21/addon/fold/foldcode.js"></script>
+    <script src="vendor/codemirror-5.65.21/addon/fold/brace-fold.js"></script>
+    <script src="vendor/codemirror-5.65.21/addon/fold/foldgutter.js"></script>
+    <script src="app.js?v=20260922-3" type="module"></script>
+  </body>
+</html>

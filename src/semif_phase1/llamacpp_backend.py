@@ -28,7 +28,7 @@ import numpy
 
 from .core import LETTERS, direct_messages, softmax
 from .direct import PROMPT_VERSION, encode_prompt
-from .shared import _state_prefix
+from .shared import _fit_state_prefix, _state_prefix
 
 DECODE_CHUNK = 512
 _BACKEND_INITIALIZED = False
@@ -321,10 +321,8 @@ class SerialPrefixScorer:
         started = time.perf_counter()
         encoded = self.model.encode_verified(row, self.max_tokens)
         ids, slots, _ = encoded
-        prefix = _state_prefix(self.tokenizer, row["state"])
+        prefix = _fit_state_prefix(_state_prefix(self.tokenizer, row["state"]), [encoded])
         hit = self.state_data is not None and prefix == self.prefix
-        if not prefix or ids[: len(prefix)] != prefix or len(ids) <= len(prefix):
-            raise ValueError("State prefix does not match the full prompt")
         prefill_seconds = 0.0
         if not hit:
             mark = time.perf_counter()
@@ -366,9 +364,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         raise ValueError("Decision IDs must be unique")
     started = time.perf_counter()
     encoded = [model.encode_verified(row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
-    if not prefix or any(ids[: len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
-        raise ValueError("The fixed state prefix does not match every full prompt")
+    prefix = _fit_state_prefix(_state_prefix(tokenizer, rows[0]["state"]), encoded)
     encode_seconds = time.perf_counter() - started
     mark = time.perf_counter()
     model.engine.clear()

@@ -10,6 +10,10 @@ mx = pytest.importorskip("mlx.core")
 pytest.importorskip("mlx_lm")
 
 from mlx_lm.models.qwen3_5 import Model, ModelArgs
+from mlx_lm.models.gemma4 import Model as Gemma4Model
+from mlx_lm.models.gemma4 import ModelArgs as Gemma4ModelArgs
+from mlx_lm.models.muse_glimmer import Model as MuseGlimmerModel
+from mlx_lm.models.muse_glimmer import ModelArgs as MuseGlimmerModelArgs
 from semif_phase1 import mlx_backend as backend
 
 
@@ -38,6 +42,57 @@ def model():
         "linear_key_head_dim": 128, "linear_value_head_dim": 128,
         "full_attention_interval": 2,
     }))
+    result.eval()
+    mx.eval(result.parameters())
+    return result
+
+
+@pytest.fixture(scope="module")
+def gemma4_model():
+    mx.random.seed(19)
+    result = Gemma4Model(Gemma4ModelArgs(
+        model_type="gemma4_unified",
+        vocab_size=256,
+        text_config={
+            "model_type": "gemma4_unified_text",
+            "hidden_size": 64,
+            "intermediate_size": 128,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "num_global_key_value_heads": 2,
+            "head_dim": 16,
+            "global_head_dim": 16,
+            "vocab_size": 256,
+            "vocab_size_per_layer_input": 256,
+            "hidden_size_per_layer_input": 0,
+            "num_kv_shared_layers": 0,
+            "layer_types": ["sliding_attention", "full_attention"],
+            "sliding_window": 64,
+            "use_double_wide_mlp": False,
+        },
+    ))
+    result.eval()
+    mx.eval(result.parameters())
+    return result
+
+
+@pytest.fixture(scope="module")
+def muse_glimmer_model():
+    mx.random.seed(23)
+    result = MuseGlimmerModel(MuseGlimmerModelArgs(
+        model_type="muse_glimmer",
+        hidden_size=64,
+        intermediate_size=128,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        vocab_size=256,
+        layer_types=["sliding_attention", "full_attention"],
+        layer_rope_theta=[500000.0, 0],
+        sliding_window=64,
+    ))
     result.eval()
     mx.eval(result.parameters())
     return result
@@ -72,6 +127,24 @@ def test_hybrid_cache_branches_padding_and_order(model, rows):
             assert_same(fresh[int(row["id"])], row)
 
 
+def test_gemma4_cache_branches_match_direct_scoring(gemma4_model, rows):
+    tokenizer = Tokenizer()
+    fresh = [backend.score(gemma4_model, tokenizer, row, {}) for row in rows]
+    shared, timing = backend.score_shared(gemma4_model, tokenizer, rows, {})
+    assert timing["batch_size"] == len(rows)
+    for expected, actual in zip(fresh, shared, strict=True):
+        assert_same(expected, actual)
+
+
+def test_muse_glimmer_cache_branches_match_direct_scoring(muse_glimmer_model, rows):
+    tokenizer = Tokenizer()
+    fresh = [backend.score(muse_glimmer_model, tokenizer, row, {}) for row in rows]
+    shared, timing = backend.score_shared(muse_glimmer_model, tokenizer, rows, {})
+    assert timing["batch_size"] == len(rows)
+    for expected, actual in zip(fresh, shared, strict=True):
+        assert_same(expected, actual)
+
+
 def test_serial_invalidates_cache_for_mutated_structured_state(model, rows):
     row = copy.deepcopy(rows[0])
     serial = backend.SerialPrefixScorer(model, Tokenizer(), {})
@@ -104,8 +177,19 @@ def test_loader_rejects_custom_or_unsupported_models(tmp_path, config):
     import json
 
     (tmp_path / "config.json").write_text(json.dumps(config))
-    with pytest.raises(ValueError, match="native Qwen3.5"):
+    with pytest.raises(ValueError, match="native Qwen3.5, Gemma 4, and Muse Glimmer"):
         backend.load_model(str(tmp_path), "local-fixture")
+
+
+@pytest.mark.parametrize("model_type", ["qwen3_5", "gemma4", "gemma4_unified", "muse_glimmer"])
+def test_loader_accepts_supported_native_model_types(tmp_path, monkeypatch, model, model_type):
+    import json
+    import mlx_lm
+
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+    monkeypatch.setattr(mlx_lm, "load", lambda *args, **kwargs: (model, Tokenizer()))
+    _, _, metadata = backend.load_model(str(tmp_path), "local-fixture")
+    assert metadata["model_type"] == model_type
 
 
 def test_remote_model_requires_immutable_revision():

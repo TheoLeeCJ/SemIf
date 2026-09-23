@@ -1,4 +1,4 @@
-"""Apple Silicon option readout using MLX-LM's native Qwen3.5 model and caches.
+"""Apple Silicon option readout using native MLX-LM models and caches.
 
 Scores remain conditional on the declared options, not calibrated confidence.
 Each suffix owns an independent copy of both attention and recurrent state.
@@ -17,10 +17,18 @@ import time
 
 from .core import softmax
 from .direct import PROMPT_VERSION, encode_prompt
-from .shared import _state_prefix
+from .shared import _fit_state_prefix, _state_prefix
 
 
 DEFAULT_CACHE_LIMIT_MIB = 256
+SUPPORTED_MODEL_TYPES = {"gemma4", "gemma4_unified", "muse_glimmer", "qwen3_5"}
+
+
+def clear_memory_cache():
+    """Return inactive MLX allocations after a service releases a model."""
+    import mlx.core as mx
+
+    mx.clear_cache()
 
 
 def load_model(source: str, revision: str, bits: int | None = None, *,
@@ -61,8 +69,11 @@ def load_model(source: str, revision: str, bits: int | None = None, *,
         allow_patterns=["*.json", "model*.safetensors", "*.jinja", "*.txt", "*.model"],
     ))
     config = json.loads((path / "config.json").read_text())
-    if config.get("model_file") or config.get("model_type") not in {"qwen3_5"}:
-        raise ValueError("MLX backend supports native Qwen3.5 text scoring only; custom model code is not allowed")
+    if config.get("model_file") or config.get("model_type") not in SUPPORTED_MODEL_TYPES:
+        raise ValueError(
+            "MLX backend supports native Qwen3.5, Gemma 4, and Muse Glimmer text scoring only; "
+            "custom model code is not allowed"
+        )
     if bits and (config.get("quantization") or config.get("quantization_config")):
         raise ValueError("In-memory quantization requires an unquantized source checkpoint")
     artifacts = {}
@@ -81,6 +92,7 @@ def load_model(source: str, revision: str, bits: int | None = None, *,
     mx.synchronize()
     metadata = {
         "source": source, "revision": revision, "backend": "mlx",
+        "model_type": config["model_type"],
         "mlx_version": version("mlx"), "mlx_lm_version": version("mlx-lm"),
         "transformers_version": version("transformers"),
         "mlx_lm_source": json.loads(distribution("mlx-lm").read_text("direct_url.json") or "null"),
@@ -134,11 +146,6 @@ def _prefill(model, prefix):
     return cache
 
 
-def _check_prefix(prefix, encoded):
-    if not prefix or any(ids[:len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
-        raise ValueError("The fixed state prefix does not match every full prompt")
-
-
 class SerialPrefixScorer:
     """Reuse only the current exact state; never mutate the retained prefix."""
 
@@ -153,9 +160,8 @@ class SerialPrefixScorer:
         mx.synchronize()
         started = time.perf_counter()
         encoded = encode_prompt(self.tokenizer, row, self.max_tokens)
-        prefix = _state_prefix(self.tokenizer, row["state"])
+        prefix = _fit_state_prefix(_state_prefix(self.tokenizer, row["state"]), [encoded])
         hit = self.cache is not None and prefix == self.prefix
-        _check_prefix(prefix, [encoded])
         prefill_seconds = 0.0
         if not hit:
             self.cache = self.prefix = None
@@ -198,8 +204,7 @@ def score_shared(model, tokenizer, rows, metadata, max_tokens=4096):
     mx.synchronize()
     started = time.perf_counter()
     encoded = [encode_prompt(tokenizer, row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
-    _check_prefix(prefix, encoded)
+    prefix = _fit_state_prefix(_state_prefix(tokenizer, rows[0]["state"]), encoded)
     suffixes = [ids[len(prefix):] for ids, _, _ in encoded]
     lengths = [len(ids) for ids in suffixes]
     width = max(lengths)
