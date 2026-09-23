@@ -38,7 +38,7 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
         load_model=lambda source, revision, gguf, *, threads, context_tokens, gpu_layers, sequences:
             (None, None, {"gguf": str(gguf), "threads": threads, "context_tokens": context_tokens,
                           "gpu_layers": gpu_layers, "sequences": sequences}),
-        score=lambda model, tokenizer, row, metadata, max_tokens: metadata,
+        score=lambda model, tokenizer, row, metadata, max_tokens, prompt=None: metadata,
         SerialPrefixScorer=None, score_shared=None,
     )
     monkeypatch.setattr(semif_phase1, "llamacpp_backend", fake_backend, raising=False)
@@ -154,14 +154,14 @@ def test_serial_cache_keys_on_exact_prefix_tokens(monkeypatch):
         def __init__(self):
             self.engine = FakeEngine()
 
-        def encode_verified(self, row, max_tokens):
+        def encode_verified(self, row, max_tokens, prompt=None):
             prefix = [1 if key == "a" else 2 for key in row["state"]]
             return prefix + [9], [0, 1], "hash"
 
     monkeypatch.setattr(
         llamacpp_backend,
         "_state_prefix",
-        lambda tokenizer, state: [1 if key == "a" else 2 for key in state],
+        lambda tokenizer, state, prompt=None: [1 if key == "a" else 2 for key in state],
     )
     model = FakeModel()
     scorer = llamacpp_backend.SerialPrefixScorer(model, object(), {})

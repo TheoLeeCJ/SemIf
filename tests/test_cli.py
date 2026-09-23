@@ -9,6 +9,7 @@ import pytest
 
 import semif_phase1
 from semif_phase1 import cli
+from semif_phase1.core import DEFAULT_PROMPT
 from semif_phase1.cli import main
 
 
@@ -34,7 +35,7 @@ def test_cli_passes_cache_limit_to_loader(tmp_path, monkeypatch, limit):
         DEFAULT_CACHE_LIMIT_MIB=256,
         load_model=lambda source, revision, bits, *, cache_limit_mib:
             (None, None, {'limit': cache_limit_mib}),
-        score=lambda model, tokenizer, row, metadata, max_tokens: metadata,
+        score=lambda model, tokenizer, row, metadata, max_tokens, prompt=None: metadata,
         SerialPrefixScorer=None, score_shared=None,
     )
     monkeypatch.setattr(semif_phase1, 'mlx_backend', fake_backend, raising=False)
@@ -111,11 +112,11 @@ def test_mlx_routes_to_matching_scorer(run_cli, backends, mode):
     mlx.load_model.assert_called_once()
     assert all(mock.call_count == 0 for mock in vars(backends.torch).values())
     if mode == "direct":
-        assert mlx.score.call_args_list == [call(model, tokenizer, row, metadata, 128) for row in run_cli.rows]
+        assert mlx.score.call_args_list == [call(model, tokenizer, row, metadata, 128, prompt=DEFAULT_PROMPT) for row in run_cli.rows]
     elif mode == "serial":
         assert mlx.SerialPrefixScorer.return_value.score.call_args_list == [call(row) for row in run_cli.rows]
     else:
-        mlx.score_shared.assert_called_once_with(model, tokenizer, run_cli.rows, metadata, 128)
+        mlx.score_shared.assert_called_once_with(model, tokenizer, run_cli.rows, metadata, 128, prompt=DEFAULT_PROMPT)
     expected = backends.results if mode != "shared" else [
         {**result, "shared_timing": backends.timing} for result in backends.results
     ]

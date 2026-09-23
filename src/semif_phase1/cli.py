@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from functools import partial
 from pathlib import Path
 
-from .core import load_causal_model, validate_row
+from .core import load_causal_model, resolve_prompt, validate_row
 from .direct import score as direct_score
 from .reranker import score as reranker_score
 from .serial import SerialPrefixScorer
@@ -30,6 +31,9 @@ def main() -> None:
                         help="Shared-mode branching for --backend llamacpp: 'auto' sizes each fan-out from the "
                              "state's token counts over a unified KV buffer; N fixes n_seq_max; 1 restores "
                              "state per decision")
+    parser.add_argument("--prompt", default="en",
+                        help="Wording of the direct prompt: 'en' (default, the published prompt), 'fr', or a JSON "
+                             "file (docs/PROMPTS.md). Any other wording changes prompt_version and prompt_sha256")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -42,6 +46,12 @@ def main() -> None:
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
+    if args.mode == "reranker" and args.prompt != "en":
+        parser.error("--prompt applies to direct, serial, and shared modes; the reranker has its own prompt")
+    try:
+        prompt = resolve_prompt(args.prompt)
+    except ValueError as error:
+        parser.error(str(error))
     if args.mlx_bits and args.backend != "mlx":
         parser.error("--mlx-bits requires --backend mlx")
     if args.mlx_cache_limit_mib is not None:
@@ -112,16 +122,16 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x") as destination:
         if args.mode == "shared":
-            results, timing = shared(model, tokenizer, rows, metadata, args.max_tokens)
+            results, timing = shared(model, tokenizer, rows, metadata, args.max_tokens, prompt=prompt)
             for result in results:
                 destination.write(json.dumps({**result, "shared_timing": timing}, allow_nan=False) + "\n")
         elif args.mode == "serial":
-            scorer = serial(model, tokenizer, metadata, args.max_tokens)
+            scorer = serial(model, tokenizer, metadata, args.max_tokens, prompt=prompt)
             for row in rows:
                 destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
                 destination.flush()
         else:
-            scorer = direct if args.mode == "direct" else reranker_score
+            scorer = partial(direct, prompt=prompt) if args.mode == "direct" else reranker_score
             for row in rows:
                 destination.write(json.dumps(scorer(model, tokenizer, row, metadata, args.max_tokens), allow_nan=False) + "\n")
                 destination.flush()

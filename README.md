@@ -180,6 +180,8 @@ Calibration does not change the selected option. The clear improvement is on WAN
 Returned probabilities are conditional on the supplied options. Calibrate and validate them on the workload where they will make decisions.
 `state` may also be a nonempty JSON object or array. Direct modes preserve it as structured JSON; reranker mode renders it as document text.
 
+The words around the input — the system instruction and the JSON key names — come from a prompt: `--prompt en` (default, the published wording), `--prompt fr`, or a JSON file. The payload shape and the answer letters never change; `prompt_version` in every result names the wording. See [docs/PROMPTS.md](docs/PROMPTS.md).
+
 ## Documentation
 
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
@@ -187,6 +189,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
 - [Apple Silicon](docs/APPLE_SILICON.md) — MPS and optional MLX backends
 - [Calibration](docs/CALIBRATION.md) — fitted temperatures, out-of-fold evidence, and application
+- [Prompts](docs/PROMPTS.md) — the pluggable prompt: built-in wordings, prompt files, what never changes
 - [EXL3 bridge](exl3-bridge/README.md) — quantized 27B runner and committed evidence
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today

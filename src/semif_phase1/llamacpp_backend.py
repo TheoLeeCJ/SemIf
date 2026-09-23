@@ -35,8 +35,8 @@ import weakref
 
 import numpy
 
-from .core import LETTERS, direct_messages, softmax
-from .direct import PROMPT_VERSION, encode_prompt
+from .core import LETTERS, resolve_prompt, softmax
+from .direct import encode_prompt
 from .shared import _state_prefix
 
 DECODE_CHUNK = 512
@@ -64,9 +64,9 @@ def _model_params(library, gpu_layers: int | None):
     return params
 
 
-def _render(tokenizer, row: dict) -> str:
+def _render(tokenizer, row: dict, prompt=None) -> str:
     return tokenizer.apply_chat_template(
-        direct_messages(row), tokenize=False, add_generation_prompt=True, enable_thinking=False
+        resolve_prompt(prompt).messages(row), tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
 
 
@@ -284,9 +284,9 @@ class _Backend:
     def close(self) -> None:
         self._finalizer()
 
-    def encode_verified(self, row: dict, max_tokens: int):
-        ids, slots, prompt_hash = encode_prompt(self.tokenizer, row, max_tokens)
-        if _gguf_tokenize(self.engine.lib, self.vocab, _render(self.tokenizer, row)) != ids:
+    def encode_verified(self, row: dict, max_tokens: int, prompt=None):
+        ids, slots, prompt_hash = encode_prompt(self.tokenizer, row, max_tokens, prompt)
+        if _gguf_tokenize(self.engine.lib, self.vocab, _render(self.tokenizer, row, prompt)) != ids:
             raise ValueError(f"Row {row['id']}: GGUF tokenization disagrees with the reference tokenizer")
         return ids, slots, prompt_hash
 
@@ -398,7 +398,8 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
     return _Backend(engine, model, vocab, tokenizer), tokenizer, metadata
 
 
-def _result(row: dict, encoded, selected: list[float], vocabulary, metadata: dict, config: str, readout: str) -> dict:
+def _result(row: dict, encoded, selected: list[float], vocabulary, metadata: dict, config: str, readout: str,
+            prompt) -> dict:
     ids, slots, prompt_hash = encoded
     return {
         "id": row["id"],
@@ -410,23 +411,24 @@ def _result(row: dict, encoded, selected: list[float], vocabulary, metadata: dic
         "allowed_token_mass": float(numpy.exp(_logsumexp(numpy.asarray(selected)) - _logsumexp(vocabulary))),
         "full_vocab_argmax_id": int(vocabulary.argmax()),
         "prompt_sha256": prompt_hash,
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": prompt.version,
         "model": {**metadata, "serving_config": config},
         "readout": readout,
         "probability_status": "conditional option score over quantized weights; uncalibrated as decision confidence",
     }
 
 
-def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -> dict:
+def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096, prompt=None) -> dict:
+    prompt = resolve_prompt(prompt)
     started = time.perf_counter()
-    encoded = model.encode_verified(row, max_tokens)
+    encoded = model.encode_verified(row, max_tokens, prompt)
     mark = time.perf_counter()
     vocabulary = model.engine.full_logits(encoded[0])
     selected = vocabulary[encoded[1]].tolist()
     result = _result(
         row, encoded, selected, vocabulary, metadata, "llamacpp-direct-v1",
         "quantized last-position logits restricted to declared answer slots; no generated tokens",
-    )
+    prompt)
     result.update(forward_seconds=time.perf_counter() - mark, total_seconds=time.perf_counter() - started)
     return result
 
@@ -434,9 +436,10 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
 class SerialPrefixScorer:
     """Cache the current state once, then score restored-state branch suffixes."""
 
-    def __init__(self, model, tokenizer, metadata: dict, max_tokens: int = 4096):
+    def __init__(self, model, tokenizer, metadata: dict, max_tokens: int = 4096, prompt=None):
         self.model = model
         self.tokenizer = tokenizer
+        self.prompt = resolve_prompt(prompt)
         self.metadata = {**metadata, "serving_config": "llamacpp-state-restore-v1"}
         self.max_tokens = max_tokens
         self.prefix = None
@@ -444,9 +447,9 @@ class SerialPrefixScorer:
 
     def score(self, row: dict) -> dict:
         started = time.perf_counter()
-        encoded = self.model.encode_verified(row, self.max_tokens)
+        encoded = self.model.encode_verified(row, self.max_tokens, self.prompt)
         ids, slots, _ = encoded
-        prefix = _state_prefix(self.tokenizer, row["state"])
+        prefix = _state_prefix(self.tokenizer, row["state"], self.prompt)
         hit = self.state_data is not None and prefix == self.prefix
         if not prefix or ids[: len(prefix)] != prefix or len(ids) <= len(prefix):
             raise ValueError("State prefix does not match the full prompt")
@@ -468,7 +471,7 @@ class SerialPrefixScorer:
         result = _result(
             row, encoded, selected, vocabulary, self.metadata,
             "llamacpp-state-restore-v1", "quantized branch last-position logits over a restored prefix state",
-        )
+        self.prompt)
         result.update(
             cache_hit=hit,
             prefix_tokens=len(prefix),
@@ -508,7 +511,7 @@ def _chunks(prefix_length: int, suffix_lengths: list[int], budget: int, cap: int
     return chunks
 
 
-def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096):
+def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096, prompt=None):
     """Prefill one exact state once, then score every criterion from branches.
 
     With a single sequence the branches are restored from a saved state, one at a time. With
@@ -518,9 +521,10 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         raise ValueError("Shared scoring requires one nonempty exact state")
     if len({row["id"] for row in rows}) != len(rows):
         raise ValueError("Decision IDs must be unique")
+    prompt = resolve_prompt(prompt)
     started = time.perf_counter()
-    encoded = [model.encode_verified(row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
+    encoded = [model.encode_verified(row, max_tokens, prompt) for row in rows]
+    prefix = _state_prefix(tokenizer, rows[0]["state"], prompt)
     if not prefix or any(ids[: len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
         raise ValueError("The fixed state prefix does not match every full prompt")
     encode_seconds = time.perf_counter() - started
@@ -546,7 +550,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                 row, row_encoded, vocabulary[slots].tolist(), vocabulary, metadata,
                 "llamacpp-state-restore-shared-v1",
                 "quantized branch last-position logits over a restored prefix state",
-            ))
+            prompt))
         branch_bytes = state_data[1]
         config = "llamacpp-state-restore-shared-v1"
     else:
@@ -587,7 +591,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                     "llamacpp-seq-copy-parallel-v1",
                     "quantized branch last-position logits over copied prefix sequences; "
                     "one batched decode per chunk",
-                ))
+                    prompt))
         branch_bytes = 0
         config = "llamacpp-seq-copy-parallel-v1"
     if engine.sequences == 1:

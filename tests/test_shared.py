@@ -76,8 +76,8 @@ def test_score_shared_looped_path_forwards_one_row_per_call(monkeypatch):
         for index, key in enumerate(("a", "b"))
     ]
     monkeypatch.setattr("semif_phase1.shared.encode_prompt",
-                        lambda tok, row, limit: ([1] * 8, [2, 3], f"hash-{row['id']}"))
-    monkeypatch.setattr("semif_phase1.shared._state_prefix", lambda tokenizer, state: [1] * 6)
+                        lambda tok, row, limit, prompt=None: ([1] * 8, [2, 3], f"hash-{row['id']}"))
+    monkeypatch.setattr("semif_phase1.shared._state_prefix", lambda tokenizer, state, prompt=None: [1] * 6)
     calls = []
     results, timing = score_shared(FakeModel(calls, torch.device("mps")),
                                    SimpleNamespace(pad_token_id=0, eos_token_id=1), rows_data, {}, 4096)

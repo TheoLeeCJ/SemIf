@@ -5,9 +5,9 @@ from __future__ import annotations
 import inspect
 import time
 
-from .core import LETTERS, digest, direct_messages, softmax, synchronize
+from .core import DEFAULT_PROMPT, LETTERS, digest, resolve_prompt, softmax, synchronize
 
-PROMPT_VERSION = "direct-options-v1"
+PROMPT_VERSION = DEFAULT_PROMPT.version
 
 
 def _slot_ids(tokenizer, count: int) -> list[int]:
@@ -30,10 +30,10 @@ def _forward(model, inputs):
     return model(**kwargs).logits[:, -1, :]
 
 
-def encode_prompt(tokenizer, row: dict, max_tokens: int) -> tuple[list[int], list[int], str]:
+def encode_prompt(tokenizer, row: dict, max_tokens: int, prompt=None) -> tuple[list[int], list[int], str]:
     """Encode one decision and verify its single-token answer slots."""
     prompt = tokenizer.apply_chat_template(
-        direct_messages(row), tokenize=False, add_generation_prompt=True, enable_thinking=False
+        resolve_prompt(prompt).messages(row), tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     ids = tokenizer.encode(prompt, add_special_tokens=False)
     if not ids or len(ids) > max_tokens:
@@ -45,11 +45,12 @@ def encode_prompt(tokenizer, row: dict, max_tokens: int) -> tuple[list[int], lis
     return ids, slots, digest(prompt)
 
 
-def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -> dict:
+def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096, prompt=None) -> dict:
     import torch
 
+    prompt = resolve_prompt(prompt)
     started = time.perf_counter()
-    ids, slots, prompt_hash = encode_prompt(tokenizer, row, max_tokens)
+    ids, slots, prompt_hash = encode_prompt(tokenizer, row, max_tokens, prompt)
     device = next(model.parameters()).device
     inputs = {
         "input_ids": torch.tensor([ids], dtype=torch.long, device=device),
@@ -70,7 +71,7 @@ def score(model, tokenizer, row: dict, metadata: dict, max_tokens: int = 4096) -
         "forward_seconds": time.perf_counter() - forward_start,
         "total_seconds": time.perf_counter() - started,
         "prompt_sha256": prompt_hash,
-        "prompt_version": PROMPT_VERSION,
+        "prompt_version": prompt.version,
         "model": metadata,
         "readout": "native full-vocabulary last-position logits restricted to declared answer slots",
         "probability_status": "conditional option score; uncalibrated as decision confidence",

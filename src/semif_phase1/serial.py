@@ -8,26 +8,27 @@ import inspect
 import json
 import time
 
-from .core import direct_messages, softmax, synchronize
-from .direct import PROMPT_VERSION, encode_prompt
+from .core import resolve_prompt, softmax, synchronize
+from .direct import encode_prompt
 
 
-def _state_prefix(tokenizer, state) -> list[int]:
+def _state_prefix(tokenizer, state, prompt=None) -> list[int]:
+    prompt = resolve_prompt(prompt)
     row = {
         "id": "prefix-only",
         "state": state,
         "question": "prefix boundary placeholder",
         "options": [{"id": "yes", "description": "Yes"}, {"id": "no", "description": "No"}],
     }
-    turns = direct_messages(row)
-    prompt = tokenizer.apply_chat_template(
+    turns = prompt.messages(row)
+    rendered = tokenizer.apply_chat_template(
         turns, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     payload = turns[-1]["content"]
-    evidence = json.dumps({"evidence": state}, ensure_ascii=False)[:-1]
-    if prompt.count(payload) != 1 or not payload.startswith(evidence):
+    evidence = prompt.evidence_text(state)
+    if rendered.count(payload) != 1 or not payload.startswith(evidence):
         raise ValueError("Cannot establish a deterministic evidence prefix")
-    text = prompt[: prompt.index(payload)] + evidence
+    text = rendered[: rendered.index(payload)] + evidence
     return tokenizer.encode(text, add_special_tokens=False)[:-1]
 
 
@@ -43,9 +44,10 @@ def _cached_forward(model, inputs):
 class SerialPrefixScorer:
     """Cache the current state, then score independent copied suffix branches."""
 
-    def __init__(self, model, tokenizer, metadata: dict, max_tokens: int = 4096):
+    def __init__(self, model, tokenizer, metadata: dict, max_tokens: int = 4096, prompt=None):
         self.model = model
         self.tokenizer = tokenizer
+        self.prompt = resolve_prompt(prompt)
         self.metadata = {**metadata, "serving_config": "native-state-prefix-cache-v1"}
         self.max_tokens = max_tokens
         self.device = next(model.parameters()).device
@@ -57,9 +59,9 @@ class SerialPrefixScorer:
         import torch
 
         started = time.perf_counter()
-        ids, slots, prompt_hash = encode_prompt(self.tokenizer, row, self.max_tokens)
+        ids, slots, prompt_hash = encode_prompt(self.tokenizer, row, self.max_tokens, self.prompt)
         hit = self.cache is not None and row["state"] == self.state
-        prefix = self.prefix if hit else _state_prefix(self.tokenizer, row["state"])
+        prefix = self.prefix if hit else _state_prefix(self.tokenizer, row["state"], self.prompt)
         if not prefix or ids[: len(prefix)] != prefix or len(ids) <= len(prefix):
             raise ValueError("State prefix does not match the full prompt")
         sync = lambda: synchronize(self.device)
@@ -110,7 +112,7 @@ class SerialPrefixScorer:
                 "answer_token_ids": slots,
                 "input_tokens": len(ids),
                 "prompt_sha256": prompt_hash,
-                "prompt_version": PROMPT_VERSION,
+                "prompt_version": self.prompt.version,
                 "model": self.metadata,
                 "readout": "native-state-prefix-cache-last-position",
                 "probability_status": "conditional option score; uncalibrated as decision confidence",
