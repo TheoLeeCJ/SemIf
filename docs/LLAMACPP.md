@@ -202,8 +202,8 @@ set yet.
 ## Reproduce
 
 ```bash
-# Quality: the owned labeled workload, three serving configurations
-for MODE in direct serial shared; do
+# Quality: the owned labeled workload, direct and serial (shared needs one state per file)
+for MODE in direct serial; do
   semif-score --backend llamacpp --mode $MODE \
     --model Qwen/Qwen3.5-4B --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
     --gguf /path/to/Qwen_Qwen3.5-4B-Q4_K_M.gguf \
