@@ -92,14 +92,19 @@ claims above are unchanged. Qwen3.5-4B Q4_K_M (`bartowski/Qwen_Qwen3.5-4B-GGUF`,
 3 013 027 808 bytes), all layers on an RTX 3080 Laptop (16 GB), `llama-cpp-python`
 0.3.35 cu124.
 
-| workload | metric | Torch BF16, 3090 | GGUF Q4_K_M, laptop |
-|---|---|---:|---:|
-| authored144, direct | mean family balanced accuracy | 0.813 | 0.796 |
-| authored144, direct | ECE, own-T out-of-fold | 0.038 | 0.063 |
-| shape777, fresh | decisions / s | 2.33 | 1.40 |
-| shape777, serial prefix | decisions / s | 10.75 | 9.21 |
-| shape777, parallel shared | decisions / s | 20.03 | 10.88 (8 branches) · 10.51 (auto) |
-| shape777, parallel vs fresh | argmax flips / 777 | 6 | 16–18 |
+| workload | metric | Torch BF16, 3090 | Torch BF16, laptop 3080 | GGUF Q4_K_M, laptop 3080 |
+|---|---|---:|---:|---:|
+| authored144, direct | mean family balanced accuracy | 0.813 | 0.813 | 0.796 |
+| authored144, direct | ECE, own-T out-of-fold | 0.038 | 0.050 | 0.063 |
+| shape777, fresh | decisions / s | 2.33 | 1.51 | 1.40 |
+| shape777, serial prefix | decisions / s | 10.75 | 10.19 | 9.21 |
+| shape777, parallel shared | decisions / s | 20.03 | 14.14 | 10.88 (8 branches) · 10.51 (auto) |
+| shape777, parallel vs fresh | argmax flips / 777 | 6 | 3 | 16–18 |
+
+The laptop BF16 column uses `flash-linear-attention` for the Gated DeltaNet
+delta rule; with the reference PyTorch kernels that `pip install -e .` leaves
+in place it reads 1.10 / 7.78 / 10.24 decisions per second
+(`results/raw/shape777-torch-bf16-rtx3080-laptop-reference-kernels.json`).
 
 Raw: `results/raw/llamacpp-gguf-cuda-authored144.json`,
 `results/raw/calibration/llamacpp-gguf-cuda-authored144.json`,

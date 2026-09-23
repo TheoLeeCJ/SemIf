@@ -150,10 +150,11 @@ RTX 3080 Laptop GPU (16 GB), Q4_K_M, all 33 layers offloaded, `llama-cpp-python`
 
 ### Quality — `authored144`, direct mode
 
-| backend | mean family balanced accuracy | ECE, own-T out-of-fold | fitted T |
-|---|---:|---:|---:|
-| Torch BF16, RTX 3090 (committed) | 0.813 | 0.038 | 1.23 |
-| **llama.cpp GGUF Q4_K_M, laptop** | **0.796** | **0.063** [0.038, 0.123] | 1.26 |
+| backend | GPU | mean family balanced accuracy | ECE, own-T out-of-fold | fitted T |
+|---|---|---:|---:|---:|
+| Torch BF16 (committed) | RTX 3090 | 0.813 | 0.038 | 1.23 |
+| Torch BF16, same laptop | RTX 3080 Laptop | 0.813 | 0.050 [0.038, 0.114] | 1.25 |
+| **llama.cpp GGUF Q4_K_M** | RTX 3080 Laptop | **0.796** | **0.063** [0.038, 0.123] | 1.26 |
 
 Coverage 144/144. Median `allowed_token_mass` 0.9997, minimum 0.975, no row
 below 0.9 — the quantized model answers with a letter as reliably as the BF16
@@ -167,15 +168,23 @@ well-calibrated than BF16; its fitted temperature is nearly the same.
 
 ### Systems — `shape777`, 37 states × 21 questions
 
-| mode | decisions / s | state p50 | argmax flips vs fresh |
-|---|---:|---:|---:|
-| fresh | 1.40 | 14.97 s | — |
-| serial_prefix (state restore) | 9.21 | 2.28 s | 19 / 777 |
-| parallel_shared, `--llama-parallel 8` | 10.88 | 1.93 s | 16 / 777 |
-| parallel_shared, `auto` | 10.51 | 2.00 s | 18 / 777 |
+| backend, GPU | fresh | serial prefix | parallel shared | flips vs fresh |
+|---|---:|---:|---:|---:|
+| Torch BF16, RTX 3090 (committed) | 2.33 | 10.75 | 20.03 | 6 / 777 |
+| Torch BF16, RTX 3080 Laptop, `flash-linear-attention` | 1.51 | 10.19 | 14.14 | 3 / 777 |
+| Torch BF16, RTX 3080 Laptop, reference PyTorch kernels | 1.10 | 7.78 | 10.24 | 9 / 777 |
+| **llama.cpp Q4_K_M, RTX 3080 Laptop**, `--llama-parallel 8` | **1.40** | **9.21** | **10.88** | 16 / 777 |
+| llama.cpp Q4_K_M, RTX 3080 Laptop, `auto` | | | 10.51 | 18 / 777 |
 
-The committed Torch BF16 run on an RTX 3090 reports 2.33, 10.75 and 20.03
-decisions per second for fresh, serial and parallel.
+Decisions per second; state p50 for the GGUF: 14.97 s fresh, 2.28 s serial,
+1.93 s parallel. The two Torch rows on the laptop differ only by the Gated
+DeltaNet kernels: `pip install -e .` leaves `transformers` on its reference
+PyTorch implementation (it says so at load time); with `flash-linear-attention`
+installed the delta rule runs in Triton. `causal_conv1d` needs `nvcc` and was
+not installed. Neither kernel touches llama.cpp, which has its own ggml
+operators for these layers. On the same GPU, BF16 with the fast kernel is 8 %,
+11 % and 30 % faster than the 4-bit GGUF in the three modes; the GGUF trades
+that for 3 GB of weights instead of 8.8 and an 8.8 GB CUDA peak instead of 11.8.
 
 Two things the numbers say. Fan-out beats state restore by removing the
 serialization round-trip, not by batching: one decode per state (`auto`,
@@ -184,9 +193,12 @@ batch into micro-batches of `n_ubatch` tokens either way and the recurrent
 memory decodes them with `split_equal`. And the gap to the Torch parallel figure
 is not the fan-out's: the Torch backend runs one dense BF16 forward over padded
 suffixes, which this 4-bit hybrid path cannot match on a laptop GPU. Reports:
-`results/raw/shape777-llamacpp-gguf-cuda.json` (8 branches) and
-`results/raw/shape777-llamacpp-gguf-cuda-auto.json`, each with its
-`.predictions.jsonl`. The 16–19 argmax flips out of 777 between decode paths
+`results/raw/shape777-llamacpp-gguf-cuda.json` (8 branches),
+`results/raw/shape777-llamacpp-gguf-cuda-auto.json`,
+`results/raw/shape777-torch-bf16-rtx3080-laptop.json` and
+`…-reference-kernels.json`, each with its `.predictions.jsonl`; the laptop
+BF16 quality run is `results/raw/torch-bf16-rtx3080-laptop-authored144.json`
+with its calibration report and predictions. The 16–19 argmax flips out of 777 between decode paths
 are the quantized model's noise floor — two sequential reads of one prompt
 already differ on about 3 % of decisions when only the micro-batch size
 changes — not a property of the fan-out.
