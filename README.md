@@ -58,8 +58,9 @@ pip install -e '.[test]'
 checkpoint, on CPU or with `--llama-gpu-layers` offloaded to a GPU. Install
 `pip install -e '.[test,llamacpp]'`, download a GGUF of the pinned model (for example
 `bartowski/Qwen_Qwen3.5-4B-GGUF`), and add `--backend llamacpp --gguf /path/to/model.gguf`.
-Shared mode can fan its questions out over copied sequences in one batched decode with
-`--llama-parallel N`, which also works on hybrid Qwen3.5 memories. Prompt hashes match the
+Layers are offloaded by default when the wheel can, and shared mode fans a state's questions
+out over copied sequences in as few batched decodes as the context allows — sized from the
+rows themselves, which also works on hybrid Qwen3.5 memories. Prompt hashes match the
 Torch backend; quantized option scores have small numerical differences. See
 [docs/LLAMACPP.md](docs/LLAMACPP.md).
 

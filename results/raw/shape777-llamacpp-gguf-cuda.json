@@ -1,0 +1,100 @@
+{
+  "version": "shape777-published-v1",
+  "input_sha256": "8dcf414b12fc2684e3c4ca5f3ebfd3f525f5346fec4a9bc67eb65138101f55f1",
+  "model": {
+    "source": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "backend": "llamacpp",
+    "dtype": "gguf-quantized",
+    "gguf": {
+      "file": "Qwen_Qwen3.5-4B-Q4_K_M.gguf",
+      "bytes": 3013027808,
+      "sha256": "13c16f426047e2de38cd075bdade4a7bcbc8c774384876f677740cda65f8a983"
+    },
+    "vocab_size": 248320,
+    "threads": 16,
+    "n_gpu_layers": 99,
+    "gpu_offload_supported": true,
+    "n_seq_max": 8,
+    "kv_unified": true,
+    "readout_mode": "last",
+    "max_prompt_tokens": 4096,
+    "context_tokens": 33280,
+    "decode_chunk": 512,
+    "llama_cpp_python_version": "0.3.35",
+    "transformers_version": "5.17.0"
+  },
+  "hardware": "NVIDIA GeForce RTX 3080 Laptop GPU",
+  "backend": "llamacpp",
+  "timing_scope": "Warm model; includes prompt construction, tokenization, transfers, forward passes and CPU readout.",
+  "results": [
+    {
+      "mode": "fresh",
+      "wall_seconds": 554.5767812749982,
+      "decisions_per_second": 1.4010683934759047,
+      "state_p50_seconds": 14.966978315002052,
+      "peak_cuda_bytes": null
+    },
+    {
+      "mode": "serial_prefix",
+      "wall_seconds": 84.34987032599747,
+      "decisions_per_second": 9.211632418603978,
+      "state_p50_seconds": 2.2772812609982793,
+      "peak_cuda_bytes": null
+    },
+    {
+      "mode": "parallel_shared",
+      "wall_seconds": 71.38284471500083,
+      "decisions_per_second": 10.884968273570589,
+      "state_p50_seconds": 1.9271048289956525,
+      "peak_cuda_bytes": null
+    }
+  ],
+  "comparisons_to_fresh": {
+    "serial_prefix": {
+      "max_probability_difference": 0.16279168690218887,
+      "argmax_flips": [
+        "e21a278dbaa362cb0b2a",
+        "29c24a1f1d85f99fff2d",
+        "e7a6640d3a307e09f605",
+        "00912f65d640d020606e",
+        "8378b16d3504101615a3",
+        "1c3d718ddc961a6a91f1",
+        "c59c11aa06b83f0d4741",
+        "ad3b39c63a87f3016a2c",
+        "dd3cfc0bdc9a0212adb9",
+        "bded8ebce57c079dd7b1",
+        "8ce842cdbd943735c60e",
+        "edb4b6fd6eb1e53b9cf7",
+        "419738285e8f1188abac",
+        "7d2d915848b70af07fbe",
+        "bb923b4fea4446257166",
+        "ab743219892ff36bc22f",
+        "dd9b6ed14e224a7c2a16",
+        "f8c6ffe7ad23e9f51f47",
+        "4a4280d8bd9c9f9e9578"
+      ]
+    },
+    "parallel_shared": {
+      "max_probability_difference": 0.18956031140802004,
+      "argmax_flips": [
+        "e7a6640d3a307e09f605",
+        "86bfabfe043b244f94d2",
+        "c59c11aa06b83f0d4741",
+        "ad3b39c63a87f3016a2c",
+        "dd3cfc0bdc9a0212adb9",
+        "bded8ebce57c079dd7b1",
+        "8ce842cdbd943735c60e",
+        "21938acb79a8a74da58b",
+        "edb4b6fd6eb1e53b9cf7",
+        "6cee3c76a53e7225bb89",
+        "419738285e8f1188abac",
+        "c70b4b1f019acff741d7",
+        "aac5f32e26c155d2c826",
+        "bb923b4fea4446257166",
+        "d591e861500045fb80d7",
+        "307d620bf89faa7f577e"
+      ]
+    }
+  }
+}

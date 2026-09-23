@@ -84,3 +84,25 @@ Not reproduced or established:
 - The full 711-row TypeSafe benchmark or an independently operated Jev endpoint.
 
 The next justified phase is targeted training for decision semantics and calibration, judged against these frozen baselines. It should proceed only after expanding external gold tasks and defining a held-out operational calibration target. A generic reranker fine-tune would answer the wrong question.
+
+## Appendix — llama.cpp GGUF on a laptop GPU
+
+Added with the GPU/fan-out extension of the llama.cpp backend; the phase-1
+claims above are unchanged. Qwen3.5-4B Q4_K_M (`bartowski/Qwen_Qwen3.5-4B-GGUF`,
+3 013 027 808 bytes), all layers on an RTX 3080 Laptop (16 GB), `llama-cpp-python`
+0.3.35 cu124.
+
+| workload | metric | Torch BF16, 3090 | GGUF Q4_K_M, laptop |
+|---|---|---:|---:|
+| authored144, direct | mean family balanced accuracy | 0.813 | 0.796 |
+| authored144, direct | ECE, own-T out-of-fold | 0.038 | 0.063 |
+| shape777, fresh | decisions / s | 2.33 | 1.40 |
+| shape777, serial prefix | decisions / s | 10.75 | 9.21 |
+| shape777, parallel shared | decisions / s | 20.03 | 10.88 (8 branches) · 10.51 (auto) |
+| shape777, parallel vs fresh | argmax flips / 777 | 6 | 16–18 |
+
+Raw: `results/raw/llamacpp-gguf-cuda-authored144.json`,
+`results/raw/calibration/llamacpp-gguf-cuda-authored144.json`,
+`results/raw/shape777-llamacpp-gguf-cuda.json`,
+`results/raw/shape777-llamacpp-gguf-cuda-auto.json`, with row-level predictions
+beside them. Method and caveats in [LLAMACPP.md](LLAMACPP.md).

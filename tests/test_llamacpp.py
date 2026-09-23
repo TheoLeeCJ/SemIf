@@ -18,6 +18,8 @@ from semif_phase1.cli import main
     (["--mode", "direct", "--backend", "llamacpp", "--gguf", "missing.gguf"], "requires --gguf"),
     (["--mode", "direct", "--llama-gpu-layers", "99"], "--llama-gpu-layers requires --backend llamacpp"),
     (["--mode", "direct", "--llama-parallel", "4"], "--llama-parallel requires --backend llamacpp"),
+    (["--mode", "direct", "--backend", "llamacpp", "--gguf", "x.gguf", "--llama-parallel", "0"], "at least 1"),
+    (["--mode", "direct", "--backend", "llamacpp", "--gguf", "x.gguf", "--llama-gpu-layers", "many"], "must be 'auto' or an integer"),
     (["--mode", "shared", "--llama-readout", "marginal"], "--llama-readout requires --backend llamacpp"),
 ])
 def test_invalid_llamacpp_combinations_fail_before_loading(tmp_path, monkeypatch, capsys, extra, message):
@@ -54,7 +56,7 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
     assert record["gguf"] == str(weights)
     assert record["threads"] == 7
     assert record["context_tokens"] == 4096
-    assert record["gpu_layers"] == 0 and record["sequences"] == 1 and record["readout"] == "last"
+    assert record["gpu_layers"] == "auto" and record["sequences"] == "auto" and record["readout"] == "last"
 
 
 def test_load_model_rejects_unpinned_remote_revision():
@@ -90,10 +92,11 @@ def test_model_params_initialize_once_and_apply_offload(monkeypatch):
         llama_model_default_params=lambda: SimpleNamespace(n_gpu_layers=-1),
     )
     monkeypatch.setattr(llamacpp_backend, "_BACKEND_INITIALIZED", False)
+    default = llamacpp_backend._model_params(library, None)
     cpu = llamacpp_backend._model_params(library, 0)
     gpu = llamacpp_backend._model_params(library, 99)
     assert calls == ["init"]
-    assert cpu.n_gpu_layers == 0 and gpu.n_gpu_layers == 99
+    assert default.n_gpu_layers == -1 and cpu.n_gpu_layers == 0 and gpu.n_gpu_layers == 99
 
 
 def test_restore_state_rejects_native_failure():
@@ -218,8 +221,14 @@ def test_real_gguf_scores_direct_serial_and_shared():
         ]
         assert choices(direct) == choices(serial) == choices(shared) == ["yes", "yes"]
         assert [result["cache_hit"] for result in serial] == [False, True]
+        # With the default "auto" sizing, shared mode fans out over copied sequences while serial
+        # restores state: two different decode paths over the same quantized weights, which agree
+        # on the decision but not bit for bit (measured: ~0.2 logits, the same order as changing
+        # the micro-batch size). Exact equality only holds when both paths are the restore path.
+        exact = metadata["n_seq_max"] == 1
         for serial_result, shared_result in zip(serial, shared):
-            numpy.testing.assert_allclose(serial_result["option_logits"], shared_result["option_logits"])
+            numpy.testing.assert_allclose(serial_result["option_logits"], shared_result["option_logits"],
+                                          rtol=0 if exact else 0.0, atol=0 if exact else 0.5)
         assert metadata["backend"] == "llamacpp"
         assert metadata["n_gpu_layers"] == gpu_layers
         assert metadata["max_prompt_tokens"] == 4096
@@ -256,7 +265,7 @@ def test_load_model_validates_new_arguments(tmp_path):
     weights.write_bytes(b"gguf")
     revision = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
     with pytest.raises(ValueError, match="gpu_layers"):
-        llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, gpu_layers=-1)
+        llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, gpu_layers=-2)
     with pytest.raises(ValueError, match="sequences"):
         llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, sequences=0)
     with pytest.raises(ValueError, match="readout"):
@@ -374,3 +383,42 @@ def test_marginal_readout_skips_branches_that_already_answer_with_a_slot():
         Engine(), branches=[1], prefix_length=3, suffixes=[[9]],
         vocabularies=[vocabulary], slot_lists=[[0, 1]])
     assert int(numpy.argmax(logits)) == 0 and preamble_mass == 0.0
+
+
+def test_chunks_follow_the_token_budget_and_the_cap():
+    from semif_phase1.llamacpp_backend import _chunks
+
+    # everything fits in one decode
+    assert _chunks(100, [10, 10, 10], budget=1000, cap=8) == [[0, 1, 2]]
+    # the budget splits: 100 + 400 + 400 = 900 fits, adding 400 more would not
+    assert _chunks(100, [400, 400, 400, 400], budget=1000, cap=8) == [[0, 1], [2, 3]]
+    # the cap splits
+    assert _chunks(100, [10] * 5, budget=1000, cap=2) == [[0, 1], [2, 3], [4]]
+    # a row that cannot fit even alone is an error, not a silent truncation
+    with pytest.raises(ValueError, match="exceed the context"):
+        _chunks(100, [950], budget=1000, cap=8)
+    with pytest.raises(ValueError, match="prefix alone"):
+        _chunks(1000, [1], budget=1000, cap=8)
+
+
+def test_engine_sizes_context_once_under_unified_kv():
+    from semif_phase1.llamacpp_backend import _Engine
+
+    seen = {}
+
+    class Params:
+        kv_unified = False
+
+    library = SimpleNamespace(
+        llama_context_default_params=lambda: Params(),
+        llama_init_from_model=lambda model, params: seen.setdefault("params", params) or object(),
+        llama_get_memory=lambda value: object(),
+        llama_n_ctx=lambda value: seen["params"].n_ctx,
+        llama_model_get_vocab=lambda model: object(),
+        llama_n_vocab=lambda vocab: 100,
+    )
+    engine = _Engine(library, object(), 4160, 4, sequences=33)
+    assert seen["params"].kv_unified is True
+    assert seen["params"].n_ctx == 4160          # not 33 x 4160: branches share the prefix cells
+    assert seen["params"].n_seq_max == 33 and seen["params"].n_outputs_max == 33
+    assert engine.kv_unified is True

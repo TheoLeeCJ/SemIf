@@ -35,19 +35,24 @@ def main() -> None:
     parser.add_argument("--backend", choices=("torch", "llamacpp"), default="torch")
     parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
     parser.add_argument("--llama-threads", type=int, help="CPU threads for --backend llamacpp")
-    parser.add_argument("--llama-gpu-layers", type=int, default=0,
-                        help="Layers offloaded to the GPU for --backend llamacpp (default: 0)")
-    parser.add_argument("--llama-parallel", type=int, default=1,
-                        help="Branch slots for llama.cpp shared mode (default: 1 = state restore)")
+    parser.add_argument("--llama-gpu-layers", default="auto",
+                        help="GPU layers for --backend llamacpp: 'auto' (library default), 0 (CPU) or N")
+    parser.add_argument("--llama-parallel", default="auto",
+                        help="llama.cpp shared-mode branching: 'auto' (sized per state), N, or 1 (state restore)")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output must be new")
     if args.backend == "llamacpp":
         if args.gguf is None or not args.gguf.is_file():
             parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
-        if args.llama_gpu_layers < 0 or args.llama_parallel < 1:
-            parser.error("--llama-gpu-layers must be nonnegative and --llama-parallel positive")
-    elif args.gguf is not None or args.llama_threads is not None or args.llama_gpu_layers or args.llama_parallel != 1:
+        for name in ("llama_gpu_layers", "llama_parallel"):
+            value = getattr(args, name)
+            if value != "auto":
+                try:
+                    setattr(args, name, int(value))
+                except ValueError:
+                    parser.error(f"--{name.replace('_', '-')} must be 'auto' or an integer")
+    elif args.gguf is not None or args.llama_threads is not None or args.llama_gpu_layers != "auto" or args.llama_parallel != "auto":
         parser.error("llama.cpp options require --backend llamacpp")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     groups = defaultdict(list)
@@ -66,7 +71,8 @@ def main() -> None:
         SerialPrefixScorer = llamacpp_backend.SerialPrefixScorer
         score_shared = llamacpp_backend.score_shared
         cuda = None
-        hardware = (_gpu_name() or "unknown GPU") if args.llama_gpu_layers else "CPU"
+        offloaded = metadata["n_gpu_layers"] != 0 and metadata["gpu_offload_supported"]
+        hardware = (_gpu_name() or "unknown GPU") if offloaded else "CPU"
     else:
         model, tokenizer, metadata = load_causal_model(args.model, args.revision, "cuda")
         import torch as cuda

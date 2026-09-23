@@ -42,17 +42,27 @@ from .shared import _state_prefix
 
 DECODE_CHUNK = 512
 READOUTS = ("last", "marginal")
+AUTO = "auto"
+#: Upper bound on branches per fan-out when `sequences` is "auto". With a unified KV buffer the
+#: bound costs bookkeeping only; the real limit is the token budget, checked per state.
+BRANCH_CAP = 32
 _BACKEND_INITIALIZED = False
 
 
-def _model_params(library, gpu_layers: int):
-    """Initialize llama.cpp once and return model parameters with the requested GPU offload."""
+def _model_params(library, gpu_layers: int | None):
+    """Initialize llama.cpp once and return model parameters.
+
+    ``None`` keeps the library's own default for ``n_gpu_layers`` (``-1``, every layer, in current
+    builds); an integer overrides it. The value that ends up in the params is what the metadata
+    reports, so a run is reproducible whichever way it was chosen.
+    """
     global _BACKEND_INITIALIZED
     if not _BACKEND_INITIALIZED:
         library.llama_backend_init()
         _BACKEND_INITIALIZED = True
     params = library.llama_model_default_params()
-    params.n_gpu_layers = gpu_layers
+    if gpu_layers is not None:
+        params.n_gpu_layers = gpu_layers
     return params
 
 
@@ -100,9 +110,17 @@ class _Engine:
         if not (isinstance(sequences, int) and sequences >= 1):
             raise ValueError("sequences must be a positive integer")
         params = library.llama_context_default_params()
-        # Sequence 0 keeps the prefix; the others are branch slots. Without a unified KV buffer
-        # llama.cpp splits n_ctx across sequences, so size it for the worst case either way.
-        params.n_ctx = context_tokens * sequences
+        # Sequence 0 keeps the prefix; the others are branch slots. With a unified KV buffer every
+        # sequence sees the whole n_ctx (measured: 16 sequences, n_ctx 4096 -> 4096 per sequence,
+        # against 256 without), and copied branches share the prefix's cells, so the context is
+        # sized once for the longest prompt and the branch count is decided per state from the
+        # token budget. Without a unified buffer llama.cpp splits n_ctx across sequences, and the
+        # only safe sizing is the worst case.
+        unified = None
+        if sequences > 1 and hasattr(params, "kv_unified"):
+            params.kv_unified = True
+            unified = True
+        params.n_ctx = context_tokens if unified or sequences == 1 else context_tokens * sequences
         params.n_seq_max = sequences
         # One flagged output per sequence in a fan-out batch; llama.cpp requires
         # n_outputs_max >= n_seq_max * n_outputs_max_per_seq.
@@ -110,11 +128,6 @@ class _Engine:
         params.n_outputs_max_per_seq = 1
         params.n_threads = threads
         params.n_threads_batch = threads
-        unified = None
-        if sequences > 1 and hasattr(params, "kv_unified"):
-            # Branches share the whole prefix; llama.h recommends the unified buffer for that case.
-            params.kv_unified = True
-            unified = True
         self.lib = library
         self.model = model
         self.sequences = sequences
@@ -309,13 +322,16 @@ def _verify_vocabulary(tokenizer, library, vocab) -> None:
 
 
 def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
-               context_tokens: int = 4096, gpu_layers: int = 0, sequences: int = 1,
-               readout: str = "last"):
+               context_tokens: int = 4096, gpu_layers: int | str | None = AUTO,
+               sequences: int | str = AUTO, readout: str = "last"):
     """Load one pinned reference tokenizer plus a local GGUF checkpoint for scoring.
 
-    ``gpu_layers`` is passed straight to llama.cpp (0 keeps the historical CPU behaviour, a
-    large value offloads every layer). ``sequences`` is the context's ``n_seq_max``: with more
-    than one, shared scoring fans suffixes out over copied sequences instead of restoring state.
+    ``gpu_layers``: ``"auto"`` (or ``None``) leaves llama.cpp's default, which offloads every
+    layer when the library can; ``0`` forces CPU; any other integer is passed through.
+
+    ``sequences``: ``"auto"`` opens ``1 + BRANCH_CAP`` sequences over a unified KV buffer and lets
+    shared scoring size each fan-out from the state's own token counts; an integer fixes
+    ``n_seq_max`` (``1`` keeps the historical state-restore path).
     """
     local = Path(source).is_dir()
     if not local and not re.fullmatch(r"[0-9a-f]{40}", revision or ""):
@@ -331,10 +347,15 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         threads = os.cpu_count() or 4
     if not (isinstance(threads, int) and threads >= 1):
         raise ValueError("threads must be a positive integer")
-    if not (isinstance(gpu_layers, int) and gpu_layers >= 0):
-        raise ValueError("gpu_layers must be a nonnegative integer")
+    if gpu_layers == AUTO:
+        gpu_layers = None
+    if gpu_layers is not None and not (isinstance(gpu_layers, int) and gpu_layers >= -1):
+        raise ValueError("gpu_layers must be 'auto', -1, or a nonnegative integer")
+    auto_sequences = sequences == AUTO
+    if auto_sequences:
+        sequences = 1 + BRANCH_CAP
     if not (isinstance(sequences, int) and sequences >= 1):
-        raise ValueError("sequences must be a positive integer")
+        raise ValueError("sequences must be 'auto' or a positive integer")
     if readout not in READOUTS:
         raise ValueError(f"readout must be one of {READOUTS}")
     import transformers
@@ -376,9 +397,11 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         "gguf": gguf_record,
         "vocab_size": engine.vocab_size,
         "threads": threads,
-        "n_gpu_layers": gpu_layers,
+        "n_gpu_layers": int(model_params.n_gpu_layers),
+        "n_gpu_layers_requested": "auto" if gpu_layers is None else gpu_layers,
         "gpu_offload_supported": bool(llama_cpp.llama_supports_gpu_offload()),
         "n_seq_max": sequences,
+        "branch_sizing": "auto" if auto_sequences else "fixed",
         "kv_unified": engine.kv_unified,
         "readout_mode": readout,
         "max_prompt_tokens": context_tokens,
@@ -473,6 +496,31 @@ class SerialPrefixScorer:
             total_seconds=time.perf_counter() - started,
         )
         return result
+
+
+def _chunks(prefix_length: int, suffix_lengths: list[int], budget: int, cap: int) -> list[list[int]]:
+    """Group consecutive rows into fan-out chunks from what the context can hold.
+
+    A chunk holds at most ``cap`` branches and never more than ``budget`` tokens including the
+    shared prefix. Everything here is known before the first decode, so the branch count is a
+    consequence of the data, not a setting.
+    """
+    if budget <= prefix_length:
+        raise ValueError("The state prefix alone exceeds the context")
+    chunks: list[list[int]] = []
+    current: list[int] = []
+    total = prefix_length
+    for index, length in enumerate(suffix_lengths):
+        if prefix_length + length > budget:
+            raise ValueError(f"Row {index}: prefix plus suffix exceed the context; raise --max-tokens")
+        if current and (len(current) >= cap or total + length > budget):
+            chunks.append(current)
+            current, total = [], prefix_length
+        current.append(index)
+        total += length
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _marginal_readout(engine: _Engine, branches: list[int], prefix_length: int,
@@ -574,10 +622,16 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         branch_bytes = state_data[1]
         config = "llamacpp-state-restore-shared-v1"
     else:
-        width = engine.sequences - 1
-        for start in range(0, len(rows), width):
-            chunk_rows = rows[start : start + width]
-            chunk_encoded = encoded[start : start + width]
+        # Under a unified KV buffer the copied branches share the prefix cells, so the budget is
+        # the context minus a small margin; otherwise each sequence has its own slice of n_ctx.
+        per_sequence = engine.context_tokens if engine.kv_unified else engine.context_tokens // engine.sequences
+        budget = per_sequence - 8 if engine.kv_unified else per_sequence
+        chunks = _chunks(len(prefix), [len(ids) - len(prefix) for ids, _, _ in encoded],
+                         budget, engine.sequences - 1)
+        branch_counts = [len(chunk) for chunk in chunks]
+        for chunk in chunks:
+            chunk_rows = [rows[i] for i in chunk]
+            chunk_encoded = [encoded[i] for i in chunk]
             suffixes = [ids[len(prefix) :] for ids, _, _ in chunk_encoded]
             slot_lists = [slots for _, slots, _ in chunk_encoded]
             branches = list(range(1, len(suffixes) + 1))
@@ -622,6 +676,8 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                 results.append(result)
         branch_bytes = 0
         config = "llamacpp-seq-copy-parallel-marginal-v1" if marginal else "llamacpp-seq-copy-parallel-v1"
+    if engine.sequences == 1:
+        branch_counts = [1] * len(rows)
     suffix_total = sum(len(ids) - len(prefix) for ids, _, _ in encoded)
     timing = {
         "total_seconds": time.perf_counter() - started,
@@ -632,6 +688,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         "suffix_forward_seconds": suffix_seconds,
         "batch_size": len(rows),
         "branch_slots": engine.sequences - 1,
+        "branches_per_decode": branch_counts,
         "branch_state_bytes": branch_bytes,
         "serving_config": config,
         "true_suffix_tokens": suffix_total,
