@@ -1,4 +1,4 @@
-"""CPU option readout over GGUF checkpoints through llama.cpp.
+"""Option readout over GGUF checkpoints through llama.cpp, on CPU or with GPU offload.
 
 Prompt construction and answer-slot verification stay on the reference
 transformers tokenizer, so prompt_sha256 matches the Torch backend exactly;
@@ -6,11 +6,21 @@ llama.cpp only executes the forward pass over the quantized GGUF weights.
 Every scored prompt is re-tokenized through the GGUF vocabulary and must
 agree with the reference encoding before it is evaluated.
 
-Sequence 0 of the single context holds the prefill; each decision restores the
-saved prefix state (whole-sequence save/restore) before decoding its suffix.
-The hybrid linear-attention memory of Qwen3.5 supports neither sequence
-copies nor partial tail removal, so branch replication goes through the
-per-sequence state serialization llama.cpp itself uses for slot caching.
+Sequence 0 of the context holds the state prefill. Two ways to branch from it:
+
+* **state restore** (``sequences == 1``): each decision restores the saved
+  sequence-0 state, then decodes its suffix. One restore per decision.
+* **sequence copy** (``sequences > 1``): the prefix is copied with
+  ``llama_memory_seq_cp`` into up to ``sequences - 1`` throwaway sequences and
+  all their suffixes are decoded in one batched ``llama_decode``. No state
+  serialization, no restore; the branches are removed whole afterwards.
+
+Hybrid linear-attention models such as Qwen3.5 keep a recurrent state that
+cannot be partially erased, so ``llama_memory_seq_rm`` refuses to truncate a
+tail back to the prefix. They do support whole-sequence removal, state
+save/restore, and sequence copies (``llama_memory_recurrent::seq_cp``), which is
+what both branching modes rely on. Pure-attention models additionally allow
+tail truncation, which the optional marginal readout uses when available.
 """
 
 from __future__ import annotations
@@ -31,17 +41,18 @@ from .direct import PROMPT_VERSION, encode_prompt
 from .shared import _state_prefix
 
 DECODE_CHUNK = 512
+READOUTS = ("last", "marginal")
 _BACKEND_INITIALIZED = False
 
 
-def _cpu_model_params(library):
-    """Initialize llama.cpp once and return model parameters with GPU offload disabled."""
+def _model_params(library, gpu_layers: int):
+    """Initialize llama.cpp once and return model parameters with the requested GPU offload."""
     global _BACKEND_INITIALIZED
     if not _BACKEND_INITIALIZED:
         library.llama_backend_init()
         _BACKEND_INITIALIZED = True
     params = library.llama_model_default_params()
-    params.n_gpu_layers = 0
+    params.n_gpu_layers = gpu_layers
     return params
 
 
@@ -76,19 +87,38 @@ def _logsumexp(values: numpy.ndarray) -> float:
     return peak + float(numpy.log(numpy.exp(values - peak).sum()))
 
 
+def _stable_softmax(values: numpy.ndarray) -> numpy.ndarray:
+    shifted = values - values.max()
+    weights = numpy.exp(shifted)
+    return weights / weights.sum()
+
+
 class _Engine:
     """One llama.cpp context bound to a loaded GGUF model."""
 
-    def __init__(self, library, model, context_tokens: int, threads: int):
+    def __init__(self, library, model, context_tokens: int, threads: int, sequences: int = 1):
+        if not (isinstance(sequences, int) and sequences >= 1):
+            raise ValueError("sequences must be a positive integer")
         params = library.llama_context_default_params()
-        params.n_ctx = context_tokens
-        params.n_seq_max = 1
-        # llama.cpp requires n_outputs_max >= n_seq_max * n_outputs_max_per_seq.
-        params.n_outputs_max = 1
+        # Sequence 0 keeps the prefix; the others are branch slots. Without a unified KV buffer
+        # llama.cpp splits n_ctx across sequences, so size it for the worst case either way.
+        params.n_ctx = context_tokens * sequences
+        params.n_seq_max = sequences
+        # One flagged output per sequence in a fan-out batch; llama.cpp requires
+        # n_outputs_max >= n_seq_max * n_outputs_max_per_seq.
+        params.n_outputs_max = sequences
+        params.n_outputs_max_per_seq = 1
         params.n_threads = threads
         params.n_threads_batch = threads
+        unified = None
+        if sequences > 1 and hasattr(params, "kv_unified"):
+            # Branches share the whole prefix; llama.h recommends the unified buffer for that case.
+            params.kv_unified = True
+            unified = True
         self.lib = library
         self.model = model
+        self.sequences = sequences
+        self.kv_unified = unified
         self.context = library.llama_init_from_model(model, params)
         if not self.context:
             raise RuntimeError("llama.cpp failed to create the scoring context")
@@ -99,12 +129,21 @@ class _Engine:
             raise RuntimeError("llama.cpp returned no context memory")
         self.context_tokens = int(library.llama_n_ctx(self.context))
         self.vocab_size = library.llama_n_vocab(library.llama_model_get_vocab(model))
+        self.can_truncate = None  # learned on first attempt; depends on the model architecture
 
     def close(self) -> None:
         if self.context:
             self.lib.llama_free(self.context)
             self.context = None
             self.memory = None
+
+    def _logits_at(self, index: int) -> numpy.ndarray:
+        pointer = self.lib.llama_get_logits_ith(self.context, index)
+        if not pointer:
+            raise RuntimeError("llama.cpp returned no logits for the flagged position")
+        return numpy.ctypeslib.as_array(
+            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_float)), shape=(self.vocab_size,)
+        ).copy()
 
     def _decode(self, tokens: list[int], start: int, sequence: int, want_logits: bool):
         if not tokens:
@@ -127,12 +166,36 @@ class _Engine:
                 self.lib.llama_batch_free(batch)
         if not want_logits:
             return None
-        pointer = self.lib.llama_get_logits_ith(self.context, -1)
-        if not pointer:
-            raise RuntimeError("llama.cpp returned no logits for the flagged position")
-        return numpy.ctypeslib.as_array(
-            ctypes.cast(pointer, ctypes.POINTER(ctypes.c_float)), shape=(self.vocab_size,)
-        ).copy()
+        return self._logits_at(-1)
+
+    def _decode_items(self, items: list[tuple[int, int, int, bool]]) -> dict[int, numpy.ndarray]:
+        """Decode (token, position, sequence, want_logits) items across sequences in one pass.
+
+        Logits are read right after the chunk that produced them: llama.cpp only exposes the
+        outputs of the most recent ``llama_decode`` call.
+        """
+        if not items:
+            raise ValueError("Refusing to decode an empty item list")
+        collected: dict[int, numpy.ndarray] = {}
+        for offset in range(0, len(items), DECODE_CHUNK):
+            chunk = items[offset : offset + DECODE_CHUNK]
+            batch = self.lib.llama_batch_init(len(chunk), 0, self.sequences)
+            try:
+                for index, (token, position, sequence, want) in enumerate(chunk):
+                    batch.token[index] = token
+                    batch.pos[index] = position
+                    batch.n_seq_id[index] = 1
+                    batch.seq_id[index][0] = sequence
+                    batch.logits[index] = int(want)
+                batch.n_tokens = len(chunk)
+                if self.lib.llama_decode(self.context, batch):
+                    raise RuntimeError("llama_decode failed; raise --max-tokens if prompts grew")
+                for index, (_, _, sequence, want) in enumerate(chunk):
+                    if want:
+                        collected[sequence] = self._logits_at(index)
+            finally:
+                self.lib.llama_batch_free(batch)
+        return collected
 
     def clear(self) -> None:
         self.lib.llama_memory_clear(self.memory, False)
@@ -163,6 +226,44 @@ class _Engine:
     def full_logits(self, tokens: list[int]) -> numpy.ndarray:
         self.clear()
         return self._decode(tokens, 0, 0, True)
+
+    # --- sequence-copy fan-out -------------------------------------------------------------
+
+    def fanout_logits(self, prefix_length: int, suffixes: list[list[int]]) -> list[numpy.ndarray]:
+        """Copy the sequence-0 prefix into one branch per suffix and decode them all at once.
+
+        Returns one full-vocabulary logit vector per suffix, then removes the branches whole so
+        sequence 0 is left exactly as prefilled. Whole-sequence removal never fails, on any
+        memory type.
+        """
+        if not suffixes or any(not suffix for suffix in suffixes):
+            raise ValueError("Every branch needs a nonempty suffix")
+        if len(suffixes) > self.sequences - 1:
+            raise ValueError(f"{len(suffixes)} branches exceed the {self.sequences - 1} configured slots")
+        branches = list(range(1, len(suffixes) + 1))
+        for branch in branches:
+            self.lib.llama_memory_seq_cp(self.memory, 0, branch, -1, -1)
+        items = [
+            (token, prefix_length + offset, branch, offset == len(suffix) - 1)
+            for branch, suffix in zip(branches, suffixes)
+            for offset, token in enumerate(suffix)
+        ]
+        try:
+            logits = self._decode_items(items)
+            return [logits[branch] for branch in branches]
+        finally:
+            for branch in branches:
+                self.lib.llama_memory_seq_rm(self.memory, branch, -1, -1)
+
+    def probe_branches(self, positions: dict[int, int], tokens: dict[int, int]) -> dict[int, numpy.ndarray]:
+        """Append one token to each listed branch and read the logits after it.
+
+        Used by the marginal readout: ``tokens[branch]`` is the preamble token the model wanted
+        to emit first, ``positions[branch]`` the position it goes to. Branches are live sequences
+        from the current fan-out; the caller removes them.
+        """
+        items = [(tokens[branch], positions[branch], branch, True) for branch in sorted(tokens)]
+        return self._decode_items(items)
 
 
 def _free_native(engine: _Engine, library, model) -> None:
@@ -208,8 +309,14 @@ def _verify_vocabulary(tokenizer, library, vocab) -> None:
 
 
 def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
-               context_tokens: int = 4096):
-    """Load one pinned reference tokenizer plus a local GGUF checkpoint for CPU scoring."""
+               context_tokens: int = 4096, gpu_layers: int = 0, sequences: int = 1,
+               readout: str = "last"):
+    """Load one pinned reference tokenizer plus a local GGUF checkpoint for scoring.
+
+    ``gpu_layers`` is passed straight to llama.cpp (0 keeps the historical CPU behaviour, a
+    large value offloads every layer). ``sequences`` is the context's ``n_seq_max``: with more
+    than one, shared scoring fans suffixes out over copied sequences instead of restoring state.
+    """
     local = Path(source).is_dir()
     if not local and not re.fullmatch(r"[0-9a-f]{40}", revision or ""):
         raise ValueError("Remote sources require a pinned 40-character revision; local sources require a revision label")
@@ -224,6 +331,12 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         threads = os.cpu_count() or 4
     if not (isinstance(threads, int) and threads >= 1):
         raise ValueError("threads must be a positive integer")
+    if not (isinstance(gpu_layers, int) and gpu_layers >= 0):
+        raise ValueError("gpu_layers must be a nonnegative integer")
+    if not (isinstance(sequences, int) and sequences >= 1):
+        raise ValueError("sequences must be a positive integer")
+    if readout not in READOUTS:
+        raise ValueError(f"readout must be one of {READOUTS}")
     import transformers
     try:
         import llama_cpp
@@ -241,13 +354,13 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
             checksum.update(block)
     gguf_record = {"file": gguf.name, "bytes": gguf.stat().st_size,
                    "sha256": checksum.hexdigest()}
-    model_params = _cpu_model_params(llama_cpp)
+    model_params = _model_params(llama_cpp, gpu_layers)
     model = llama_cpp.llama_model_load_from_file(str(gguf).encode("utf-8"), model_params)
     if not model:
         raise RuntimeError(f"llama.cpp failed to load the GGUF checkpoint: {gguf}")
     window = context_tokens + 64
     try:
-        engine = _Engine(llama_cpp, model, window, threads)
+        engine = _Engine(llama_cpp, model, window, threads, sequences)
         vocab = llama_cpp.llama_model_get_vocab(model)
         _verify_vocabulary(tokenizer, llama_cpp, vocab)
     except Exception:
@@ -263,7 +376,11 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         "gguf": gguf_record,
         "vocab_size": engine.vocab_size,
         "threads": threads,
-        "n_gpu_layers": 0,
+        "n_gpu_layers": gpu_layers,
+        "gpu_offload_supported": bool(llama_cpp.llama_supports_gpu_offload()),
+        "n_seq_max": sequences,
+        "kv_unified": engine.kv_unified,
+        "readout_mode": readout,
         "max_prompt_tokens": context_tokens,
         "context_tokens": engine.context_tokens,
         "decode_chunk": DECODE_CHUNK,
@@ -358,8 +475,66 @@ class SerialPrefixScorer:
         return result
 
 
+def _marginal_readout(engine: _Engine, branches: list[int], prefix_length: int,
+                      suffixes: list[list[int]], vocabularies: list[numpy.ndarray],
+                      slot_lists: list[list[int]], probes: int = 2, floor: float = 0.05):
+    """Fold one-token preambles back into the answer-slot masses.
+
+    Some checkpoints want to emit a token before the letter — Qwen3-8B puts almost all of its
+    mass on the Markdown ``**`` token when the assistant turn starts empty. Reading only the last
+    prompt position then reads the preamble, not the answer. For each branch whose most likely
+    next tokens are not answer slots, this appends up to ``probes`` such tokens (one extra batched
+    decode per probe rank across all branches), reads the slot masses after them, and adds them
+    to the direct slot masses weighted by the preamble's probability. The argmax and the reported
+    ``option_logits`` become log-masses of that truncated path sum.
+
+    Returns per-branch (option_logits, preamble_mass) with option_logits as natural logs of the
+    summed masses, so downstream softmax and temperature scaling keep working unchanged.
+    """
+    live = {branch: prefix_length + len(suffix) for branch, suffix in zip(branches, suffixes)}
+    masses, via = [], []
+    for vocabulary, slots in zip(vocabularies, slot_lists):
+        probabilities = _stable_softmax(vocabulary.astype(numpy.float64))
+        masses.append(probabilities[slots].copy())
+        via.append(0.0)
+    # Candidate preambles per branch: top tokens that are not answer slots.
+    candidates: list[list[int]] = []
+    for vocabulary, slots in zip(vocabularies, slot_lists):
+        forbidden = set(slots)
+        order = numpy.argsort(-vocabulary)[: probes + len(slots)]
+        candidates.append([int(token) for token in order if int(token) not in forbidden][:probes])
+    weights = [_stable_softmax(vocabulary.astype(numpy.float64)) for vocabulary in vocabularies]
+    for rank in range(probes):
+        tokens, positions = {}, {}
+        for index, branch in enumerate(branches):
+            if rank < len(candidates[index]):
+                token = candidates[index][rank]
+                if weights[index][token] >= floor:
+                    tokens[branch] = token
+                    positions[branch] = live[branch]
+        if not tokens:
+            break
+        after = engine.probe_branches(positions, tokens)
+        for index, branch in enumerate(branches):
+            if branch in tokens:
+                weight = float(weights[index][tokens[branch]])
+                gain = weight * _stable_softmax(after[branch].astype(numpy.float64))[slot_lists[index]]
+                masses[index] += gain
+                via[index] += float(gain.sum())
+                live[branch] += 1
+    results = []
+    for mass, mass_via in zip(masses, via):
+        total = float(mass.sum())
+        results.append((numpy.log(numpy.maximum(mass, 1e-300)).tolist(), mass_via / total if total > 0 else 0.0))
+    return results
+
+
 def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096):
-    """Prefill one exact state once, then score every criterion from restored branches."""
+    """Prefill one exact state once, then score every criterion from branches.
+
+    With a single sequence the branches are restored from a saved state, one at a time. With
+    ``n_seq_max > 1`` they are sequence copies decoded together, in chunks of ``n_seq_max - 1``.
+    """
     if not rows or any(row["state"] != rows[0]["state"] for row in rows[1:]):
         raise ValueError("Shared scoring requires one nonempty exact state")
     if len({row["id"] for row in rows}) != len(rows):
@@ -370,25 +545,83 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     if not prefix or any(ids[: len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
         raise ValueError("The fixed state prefix does not match every full prompt")
     encode_seconds = time.perf_counter() - started
+    engine = model.engine
+    marginal = metadata.get("readout_mode") == "marginal"
     mark = time.perf_counter()
-    model.engine.clear()
-    model.engine.prefill(prefix)
-    state_data = model.engine.save_state()
+    engine.clear()
+    engine.prefill(prefix)
+    if engine.sequences == 1:
+        state_data = engine.save_state()
     prefill_seconds = time.perf_counter() - mark
     copy_seconds = suffix_seconds = 0.0
     results = []
-    for row, row_encoded in zip(rows, encoded):
-        ids, slots, _ = row_encoded
-        mark = time.perf_counter()
-        model.engine.restore_state(state_data)
-        copy_seconds += time.perf_counter() - mark
-        mark = time.perf_counter()
-        vocabulary = model.engine.branch_logits(len(prefix), ids[len(prefix) :])
-        suffix_seconds += time.perf_counter() - mark
-        results.append(_result(
-            row, row_encoded, vocabulary[slots].tolist(), vocabulary, metadata,
-            "llamacpp-state-restore-shared-v1", "quantized branch last-position logits over a restored prefix state",
-        ))
+    if engine.sequences == 1:
+        if marginal:
+            raise ValueError("The marginal readout needs sequence copies; load with sequences > 1")
+        for row, row_encoded in zip(rows, encoded):
+            ids, slots, _ = row_encoded
+            mark = time.perf_counter()
+            engine.restore_state(state_data)
+            copy_seconds += time.perf_counter() - mark
+            mark = time.perf_counter()
+            vocabulary = engine.branch_logits(len(prefix), ids[len(prefix) :])
+            suffix_seconds += time.perf_counter() - mark
+            results.append(_result(
+                row, row_encoded, vocabulary[slots].tolist(), vocabulary, metadata,
+                "llamacpp-state-restore-shared-v1",
+                "quantized branch last-position logits over a restored prefix state",
+            ))
+        branch_bytes = state_data[1]
+        config = "llamacpp-state-restore-shared-v1"
+    else:
+        width = engine.sequences - 1
+        for start in range(0, len(rows), width):
+            chunk_rows = rows[start : start + width]
+            chunk_encoded = encoded[start : start + width]
+            suffixes = [ids[len(prefix) :] for ids, _, _ in chunk_encoded]
+            slot_lists = [slots for _, slots, _ in chunk_encoded]
+            branches = list(range(1, len(suffixes) + 1))
+            mark = time.perf_counter()
+            for branch in branches:
+                engine.lib.llama_memory_seq_cp(engine.memory, 0, branch, -1, -1)
+            copy_seconds += time.perf_counter() - mark
+            mark = time.perf_counter()
+            try:
+                items = [
+                    (token, len(prefix) + offset, branch, offset == len(suffix) - 1)
+                    for branch, suffix in zip(branches, suffixes)
+                    for offset, token in enumerate(suffix)
+                ]
+                logits = engine._decode_items(items)
+                vocabularies = [logits[branch] for branch in branches]
+                if marginal:
+                    folded = _marginal_readout(engine, branches, len(prefix), suffixes,
+                                               vocabularies, slot_lists)
+            finally:
+                for branch in branches:
+                    engine.lib.llama_memory_seq_rm(engine.memory, branch, -1, -1)
+            suffix_seconds += time.perf_counter() - mark
+            for index, (row, row_encoded) in enumerate(zip(chunk_rows, chunk_encoded)):
+                vocabulary = vocabularies[index]
+                if marginal:
+                    selected, preamble_mass = folded[index]
+                    result = _result(
+                        row, row_encoded, selected, vocabulary, metadata,
+                        "llamacpp-seq-copy-parallel-marginal-v1",
+                        "quantized branch logits over copied prefix sequences, answer-slot masses "
+                        "summed over one-token preambles; option_logits are log-masses",
+                    )
+                    result["preamble_mass"] = preamble_mass
+                else:
+                    result = _result(
+                        row, row_encoded, vocabulary[row_encoded[1]].tolist(), vocabulary, metadata,
+                        "llamacpp-seq-copy-parallel-v1",
+                        "quantized branch last-position logits over copied prefix sequences; "
+                        "one batched decode per chunk",
+                    )
+                results.append(result)
+        branch_bytes = 0
+        config = "llamacpp-seq-copy-parallel-marginal-v1" if marginal else "llamacpp-seq-copy-parallel-v1"
     suffix_total = sum(len(ids) - len(prefix) for ids, _, _ in encoded)
     timing = {
         "total_seconds": time.perf_counter() - started,
@@ -398,7 +631,9 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         "replicate_seconds": copy_seconds,
         "suffix_forward_seconds": suffix_seconds,
         "batch_size": len(rows),
-        "branch_state_bytes": state_data[1],
+        "branch_slots": engine.sequences - 1,
+        "branch_state_bytes": branch_bytes,
+        "serving_config": config,
         "true_suffix_tokens": suffix_total,
         "padded_suffix_tokens": suffix_total,
     }

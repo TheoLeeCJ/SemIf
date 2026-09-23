@@ -23,6 +23,14 @@ def main() -> None:
     parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
     parser.add_argument("--llama-threads", type=int,
                         help="CPU threads for --backend llamacpp (default: all visible cores)")
+    parser.add_argument("--llama-gpu-layers", type=int, default=0,
+                        help="Layers to offload to the GPU for --backend llamacpp (default: 0, CPU only)")
+    parser.add_argument("--llama-parallel", type=int, default=1,
+                        help="Branch slots for --backend llamacpp shared mode: suffixes are fanned out over "
+                             "copied sequences and decoded together (default: 1 = state restore per decision)")
+    parser.add_argument("--llama-readout", choices=("last", "marginal"), default="last",
+                        help="llama.cpp shared-mode readout: last prompt position, or answer-slot masses summed "
+                             "over one-token preambles (needs --llama-parallel > 1)")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -51,11 +59,22 @@ def main() -> None:
             parser.error("--llama-threads must be positive")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
+    for name, value in (("--llama-gpu-layers", args.llama_gpu_layers), ("--llama-parallel", args.llama_parallel)):
+        if args.backend != "llamacpp" and value != parser.get_default(name.lstrip("-").replace("-", "_")):
+            parser.error(f"{name} requires --backend llamacpp")
+    if args.llama_readout != "last" and args.backend != "llamacpp":
+        parser.error("--llama-readout requires --backend llamacpp")
     if args.backend == "llamacpp":
         if args.mode == "reranker":
             parser.error("llama.cpp supports direct, serial, and shared modes; reranker requires torch")
         if args.gguf is None or not args.gguf.is_file():
             parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
+        if args.llama_gpu_layers < 0:
+            parser.error("--llama-gpu-layers must be nonnegative")
+        if args.llama_parallel < 1:
+            parser.error("--llama-parallel must be positive")
+        if args.llama_readout == "marginal" and (args.mode != "shared" or args.llama_parallel < 2):
+            parser.error("--llama-readout marginal requires --mode shared and --llama-parallel of at least 2")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     if not rows:
         parser.error("Input is empty")
@@ -75,7 +94,9 @@ def main() -> None:
 
         model, tokenizer, metadata = llamacpp_backend.load_model(
             args.model, args.revision, args.gguf,
-            threads=args.llama_threads, context_tokens=args.max_tokens)
+            threads=args.llama_threads, context_tokens=args.max_tokens,
+            gpu_layers=args.llama_gpu_layers, sequences=args.llama_parallel,
+            readout=args.llama_readout)
         direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
                                   llamacpp_backend.score_shared)
     else:
