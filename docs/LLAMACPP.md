@@ -122,6 +122,14 @@ model. With that wheel, offload the layers; for CPU scoring, use the PyPI wheel.
 
 ## Marginal readout
 
+*Validated for correctness, not for a metric gain.* On Qwen3.5-4B, which answers with the letter
+directly, every result in this document is identical with or without it, and no committed workload
+needs it. It is here for checkpoints that put their first-token mass on a preamble token; the case
+that motivated it — Qwen3-8B answering `**` before the letter, 60 % of the mass leaking without it,
+10 % with a marginalised read — was measured outside this repository, on a mail-triage fixture that
+cannot be redistributed.
+
+
 `--llama-readout marginal` (shared mode, any `--llama-parallel` but `1`) changes how
 the answer is read, not what is asked. Some checkpoints want to emit a token
 *before* the letter — Qwen3-8B puts almost all of its next-token mass on the
@@ -183,6 +191,13 @@ are the quantized model's noise floor — two sequential reads of one prompt
 already differ on about 3 % of decisions when only the micro-batch size
 changes — not a property of the fan-out.
 
+
+## JevBench
+
+[JevBench](https://github.com/fstandhartinger/jevbench) runs SemIf through its `semif_direct`
+adapter on the Torch backend (BF16, CUDA). This backend is what would let that adapter run the
+pinned GGUF on a laptop GPU with shared states fanned out; it has not been run on the full public
+set yet.
 
 ## Reproduce
 
