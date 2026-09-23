@@ -30,9 +30,6 @@ def main() -> None:
                         help="Shared-mode branching for --backend llamacpp: 'auto' sizes each fan-out from the "
                              "state's token counts over a unified KV buffer; N fixes n_seq_max; 1 restores "
                              "state per decision")
-    parser.add_argument("--llama-readout", choices=("last", "marginal"), default="last",
-                        help="llama.cpp shared-mode readout: last prompt position, or answer-slot masses summed "
-                             "over one-token preambles (needs --llama-parallel > 1)")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -77,15 +74,11 @@ def main() -> None:
     for name, value in (("--llama-gpu-layers", args.llama_gpu_layers), ("--llama-parallel", args.llama_parallel)):
         if args.backend != "llamacpp" and value != "auto":
             parser.error(f"{name} requires --backend llamacpp")
-    if args.llama_readout != "last" and args.backend != "llamacpp":
-        parser.error("--llama-readout requires --backend llamacpp")
     if args.backend == "llamacpp":
         if args.mode == "reranker":
             parser.error("llama.cpp supports direct, serial, and shared modes; reranker requires torch")
         if args.gguf is None or not args.gguf.is_file():
             parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
-        if args.llama_readout == "marginal" and (args.mode != "shared" or args.llama_parallel == 1):
-            parser.error("--llama-readout marginal requires --mode shared and --llama-parallel other than 1")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     if not rows:
         parser.error("Input is empty")
@@ -106,8 +99,7 @@ def main() -> None:
         model, tokenizer, metadata = llamacpp_backend.load_model(
             args.model, args.revision, args.gguf,
             threads=args.llama_threads, context_tokens=args.max_tokens,
-            gpu_layers=args.llama_gpu_layers, sequences=args.llama_parallel,
-            readout=args.llama_readout)
+            gpu_layers=args.llama_gpu_layers, sequences=args.llama_parallel)
         direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
                                   llamacpp_backend.score_shared)
     else:

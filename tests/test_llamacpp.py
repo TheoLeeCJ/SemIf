@@ -20,7 +20,6 @@ from semif_phase1.cli import main
     (["--mode", "direct", "--llama-parallel", "4"], "--llama-parallel requires --backend llamacpp"),
     (["--mode", "direct", "--backend", "llamacpp", "--gguf", "x.gguf", "--llama-parallel", "0"], "at least 1"),
     (["--mode", "direct", "--backend", "llamacpp", "--gguf", "x.gguf", "--llama-gpu-layers", "many"], "must be 'auto' or an integer"),
-    (["--mode", "shared", "--llama-readout", "marginal"], "--llama-readout requires --backend llamacpp"),
 ])
 def test_invalid_llamacpp_combinations_fail_before_loading(tmp_path, monkeypatch, capsys, extra, message):
     monkeypatch.setattr(sys, "argv", ["semif-score", "--model", "unused", "--revision", "unused",
@@ -36,9 +35,9 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
     import semif_phase1
 
     fake_backend = SimpleNamespace(
-        load_model=lambda source, revision, gguf, *, threads, context_tokens, gpu_layers, sequences, readout:
+        load_model=lambda source, revision, gguf, *, threads, context_tokens, gpu_layers, sequences:
             (None, None, {"gguf": str(gguf), "threads": threads, "context_tokens": context_tokens,
-                          "gpu_layers": gpu_layers, "sequences": sequences, "readout": readout}),
+                          "gpu_layers": gpu_layers, "sequences": sequences}),
         score=lambda model, tokenizer, row, metadata, max_tokens: metadata,
         SerialPrefixScorer=None, score_shared=None,
     )
@@ -56,7 +55,7 @@ def test_cli_passes_gguf_options_to_loader(tmp_path, monkeypatch):
     assert record["gguf"] == str(weights)
     assert record["threads"] == 7
     assert record["context_tokens"] == 4096
-    assert record["gpu_layers"] == "auto" and record["sequences"] == "auto" and record["readout"] == "last"
+    assert record["gpu_layers"] == "auto" and record["sequences"] == "auto"
 
 
 def test_load_model_rejects_unpinned_remote_revision():
@@ -249,11 +248,6 @@ def test_real_gguf_scores_direct_serial_and_shared():
         for shared_result, fanned_result in zip(shared, fanned):
             numpy.testing.assert_allclose(
                 shared_result["option_logits"], fanned_result["option_logits"], rtol=0, atol=0.5)
-        marginal_meta = {**metadata, "readout_mode": "marginal"}
-        folded, timing = llamacpp_backend.score_shared(model, tokenizer, rows, marginal_meta)
-        assert timing["serving_config"] == "llamacpp-seq-copy-parallel-marginal-v1"
-        assert choices(folded) == ["yes", "yes"]
-        assert all(0.0 <= result["preamble_mass"] <= 1.0 for result in folded)
     finally:
         model.close()
 
@@ -268,8 +262,6 @@ def test_load_model_validates_new_arguments(tmp_path):
         llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, gpu_layers=-2)
     with pytest.raises(ValueError, match="sequences"):
         llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, sequences=0)
-    with pytest.raises(ValueError, match="readout"):
-        llamacpp_backend.load_model("Qwen/Qwen3.5-4B", revision, weights, readout="first")
 
 
 def _fake_engine_for_fanout(sequences: int, vocab_size: int = 8):
@@ -341,48 +333,6 @@ def test_fanout_refuses_more_branches_than_slots():
     engine, _ = _fake_engine_for_fanout(sequences=2)
     with pytest.raises(ValueError, match="exceed"):
         engine.fanout_logits(3, [[1], [2]])
-
-
-def test_marginal_readout_folds_preamble_mass_into_slots():
-    from semif_phase1.llamacpp_backend import _marginal_readout
-
-    probed = {}
-
-    class Engine:
-        def probe_branches(self, positions, tokens):
-            probed.update(tokens)
-            # After the preamble token the model answers slot 1 (token id 1) with certainty.
-            out = numpy.full(8, -20.0)
-            out[1] = 20.0
-            return {branch: out.copy() for branch in tokens}
-
-    # Branch 1: the model puts its mass on token 7 (a preamble), almost none on the slots 0 and 1.
-    vocabulary = numpy.full(8, -20.0)
-    vocabulary[7] = 20.0
-    vocabulary[0] = 1.0
-    vocabulary[1] = 0.0
-    (logits, preamble_mass), = _marginal_readout(
-        Engine(), branches=[1], prefix_length=10, suffixes=[[4, 4]],
-        vocabularies=[vocabulary], slot_lists=[[0, 1]])
-    assert probed == {1: 7}
-    # Direct read alone would have picked slot 0; the preamble path moves the answer to slot 1.
-    assert int(numpy.argmax(logits)) == 1
-    assert preamble_mass > 0.99
-
-
-def test_marginal_readout_skips_branches_that_already_answer_with_a_slot():
-    from semif_phase1.llamacpp_backend import _marginal_readout
-
-    class Engine:
-        def probe_branches(self, positions, tokens):
-            raise AssertionError("no probe should be issued")
-
-    vocabulary = numpy.full(8, -20.0)
-    vocabulary[0] = 20.0  # slot 0 is the confident next token; nothing else clears the floor
-    (logits, preamble_mass), = _marginal_readout(
-        Engine(), branches=[1], prefix_length=3, suffixes=[[9]],
-        vocabularies=[vocabulary], slot_lists=[[0, 1]])
-    assert int(numpy.argmax(logits)) == 0 and preamble_mass == 0.0
 
 
 def test_chunks_follow_the_token_budget_and_the_cap():

@@ -19,8 +19,7 @@ Hybrid linear-attention models such as Qwen3.5 keep a recurrent state that
 cannot be partially erased, so ``llama_memory_seq_rm`` refuses to truncate a
 tail back to the prefix. They do support whole-sequence removal, state
 save/restore, and sequence copies (``llama_memory_recurrent::seq_cp``), which is
-what both branching modes rely on. Pure-attention models additionally allow
-tail truncation, which the optional marginal readout uses when available.
+what both branching modes rely on.
 """
 
 from __future__ import annotations
@@ -41,7 +40,6 @@ from .direct import PROMPT_VERSION, encode_prompt
 from .shared import _state_prefix
 
 DECODE_CHUNK = 512
-READOUTS = ("last", "marginal")
 AUTO = "auto"
 #: Upper bound on branches per fan-out when `sequences` is "auto". With a unified KV buffer the
 #: bound costs bookkeeping only; the real limit is the token budget, checked per state.
@@ -268,16 +266,6 @@ class _Engine:
             for branch in branches:
                 self.lib.llama_memory_seq_rm(self.memory, branch, -1, -1)
 
-    def probe_branches(self, positions: dict[int, int], tokens: dict[int, int]) -> dict[int, numpy.ndarray]:
-        """Append one token to each listed branch and read the logits after it.
-
-        Used by the marginal readout: ``tokens[branch]`` is the preamble token the model wanted
-        to emit first, ``positions[branch]`` the position it goes to. Branches are live sequences
-        from the current fan-out; the caller removes them.
-        """
-        items = [(tokens[branch], positions[branch], branch, True) for branch in sorted(tokens)]
-        return self._decode_items(items)
-
 
 def _free_native(engine: _Engine, library, model) -> None:
     engine.close()
@@ -323,7 +311,7 @@ def _verify_vocabulary(tokenizer, library, vocab) -> None:
 
 def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
                context_tokens: int = 4096, gpu_layers: int | str | None = AUTO,
-               sequences: int | str = AUTO, readout: str = "last"):
+               sequences: int | str = AUTO):
     """Load one pinned reference tokenizer plus a local GGUF checkpoint for scoring.
 
     ``gpu_layers``: ``"auto"`` (or ``None``) leaves llama.cpp's default, which offloads every
@@ -356,8 +344,6 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         sequences = 1 + BRANCH_CAP
     if not (isinstance(sequences, int) and sequences >= 1):
         raise ValueError("sequences must be 'auto' or a positive integer")
-    if readout not in READOUTS:
-        raise ValueError(f"readout must be one of {READOUTS}")
     import transformers
     try:
         import llama_cpp
@@ -403,7 +389,6 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         "n_seq_max": sequences,
         "branch_sizing": "auto" if auto_sequences else "fixed",
         "kv_unified": engine.kv_unified,
-        "readout_mode": readout,
         "max_prompt_tokens": context_tokens,
         "context_tokens": engine.context_tokens,
         "decode_chunk": DECODE_CHUNK,
@@ -523,60 +508,6 @@ def _chunks(prefix_length: int, suffix_lengths: list[int], budget: int, cap: int
     return chunks
 
 
-def _marginal_readout(engine: _Engine, branches: list[int], prefix_length: int,
-                      suffixes: list[list[int]], vocabularies: list[numpy.ndarray],
-                      slot_lists: list[list[int]], probes: int = 2, floor: float = 0.05):
-    """Fold one-token preambles back into the answer-slot masses.
-
-    Some checkpoints want to emit a token before the letter — Qwen3-8B puts almost all of its
-    mass on the Markdown ``**`` token when the assistant turn starts empty. Reading only the last
-    prompt position then reads the preamble, not the answer. For each branch whose most likely
-    next tokens are not answer slots, this appends up to ``probes`` such tokens (one extra batched
-    decode per probe rank across all branches), reads the slot masses after them, and adds them
-    to the direct slot masses weighted by the preamble's probability. The argmax and the reported
-    ``option_logits`` become log-masses of that truncated path sum.
-
-    Returns per-branch (option_logits, preamble_mass) with option_logits as natural logs of the
-    summed masses, so downstream softmax and temperature scaling keep working unchanged.
-    """
-    live = {branch: prefix_length + len(suffix) for branch, suffix in zip(branches, suffixes)}
-    masses, via = [], []
-    for vocabulary, slots in zip(vocabularies, slot_lists):
-        probabilities = _stable_softmax(vocabulary.astype(numpy.float64))
-        masses.append(probabilities[slots].copy())
-        via.append(0.0)
-    # Candidate preambles per branch: top tokens that are not answer slots.
-    candidates: list[list[int]] = []
-    for vocabulary, slots in zip(vocabularies, slot_lists):
-        forbidden = set(slots)
-        order = numpy.argsort(-vocabulary)[: probes + len(slots)]
-        candidates.append([int(token) for token in order if int(token) not in forbidden][:probes])
-    weights = [_stable_softmax(vocabulary.astype(numpy.float64)) for vocabulary in vocabularies]
-    for rank in range(probes):
-        tokens, positions = {}, {}
-        for index, branch in enumerate(branches):
-            if rank < len(candidates[index]):
-                token = candidates[index][rank]
-                if weights[index][token] >= floor:
-                    tokens[branch] = token
-                    positions[branch] = live[branch]
-        if not tokens:
-            break
-        after = engine.probe_branches(positions, tokens)
-        for index, branch in enumerate(branches):
-            if branch in tokens:
-                weight = float(weights[index][tokens[branch]])
-                gain = weight * _stable_softmax(after[branch].astype(numpy.float64))[slot_lists[index]]
-                masses[index] += gain
-                via[index] += float(gain.sum())
-                live[branch] += 1
-    results = []
-    for mass, mass_via in zip(masses, via):
-        total = float(mass.sum())
-        results.append((numpy.log(numpy.maximum(mass, 1e-300)).tolist(), mass_via / total if total > 0 else 0.0))
-    return results
-
-
 def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096):
     """Prefill one exact state once, then score every criterion from branches.
 
@@ -594,7 +525,6 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
         raise ValueError("The fixed state prefix does not match every full prompt")
     encode_seconds = time.perf_counter() - started
     engine = model.engine
-    marginal = metadata.get("readout_mode") == "marginal"
     mark = time.perf_counter()
     engine.clear()
     engine.prefill(prefix)
@@ -604,8 +534,6 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     copy_seconds = suffix_seconds = 0.0
     results = []
     if engine.sequences == 1:
-        if marginal:
-            raise ValueError("The marginal readout needs sequence copies; load with sequences > 1")
         for row, row_encoded in zip(rows, encoded):
             ids, slots, _ = row_encoded
             mark = time.perf_counter()
@@ -648,34 +576,20 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                 ]
                 logits = engine._decode_items(items)
                 vocabularies = [logits[branch] for branch in branches]
-                if marginal:
-                    folded = _marginal_readout(engine, branches, len(prefix), suffixes,
-                                               vocabularies, slot_lists)
             finally:
                 for branch in branches:
                     engine.lib.llama_memory_seq_rm(engine.memory, branch, -1, -1)
             suffix_seconds += time.perf_counter() - mark
             for index, (row, row_encoded) in enumerate(zip(chunk_rows, chunk_encoded)):
                 vocabulary = vocabularies[index]
-                if marginal:
-                    selected, preamble_mass = folded[index]
-                    result = _result(
-                        row, row_encoded, selected, vocabulary, metadata,
-                        "llamacpp-seq-copy-parallel-marginal-v1",
-                        "quantized branch logits over copied prefix sequences, answer-slot masses "
-                        "summed over one-token preambles; option_logits are log-masses",
-                    )
-                    result["preamble_mass"] = preamble_mass
-                else:
-                    result = _result(
-                        row, row_encoded, vocabulary[row_encoded[1]].tolist(), vocabulary, metadata,
-                        "llamacpp-seq-copy-parallel-v1",
-                        "quantized branch last-position logits over copied prefix sequences; "
-                        "one batched decode per chunk",
-                    )
-                results.append(result)
+                results.append(_result(
+                    row, row_encoded, vocabulary[row_encoded[1]].tolist(), vocabulary, metadata,
+                    "llamacpp-seq-copy-parallel-v1",
+                    "quantized branch last-position logits over copied prefix sequences; "
+                    "one batched decode per chunk",
+                ))
         branch_bytes = 0
-        config = "llamacpp-seq-copy-parallel-marginal-v1" if marginal else "llamacpp-seq-copy-parallel-v1"
+        config = "llamacpp-seq-copy-parallel-v1"
     if engine.sequences == 1:
         branch_counts = [1] * len(rows)
     suffix_total = sum(len(ids) - len(prefix) for ids, _, _ in encoded)

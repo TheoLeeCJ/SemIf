@@ -106,9 +106,8 @@ build option; the same wheel serves both modes.
 
 `tests/test_llamacpp.py::test_real_gguf_scores_direct_serial_and_shared` loads the
 real GGUF twice — with one sequence and with three — and checks that direct,
-serial, restore-shared, copy-shared and marginal readouts agree on the
-decisions, that copy-shared option logits match restore-shared ones within
-0.5, and that `preamble_mass` stays in `[0, 1]`. Set `SEMIF_LLAMACPP_GGUF` to run
+serial, restore-shared and copy-shared readouts agree on the decisions and
+that copy-shared option logits match restore-shared ones within 0.5. Set `SEMIF_LLAMACPP_GGUF` to run
 it, `SEMIF_LLAMACPP_GPU_LAYERS` to offload. It passes on:
 
 - the PyPI CPU wheel of `llama-cpp-python` 0.3.35, CPU only;
@@ -119,30 +118,6 @@ it, `SEMIF_LLAMACPP_GPU_LAYERS` to offload. It passes on:
 `Illegal instruction` on an Intel Xeon W-11955M (AVX-512 without `avx512_bf16`
 or AMX) for any decode, single- or multi-sequence, hybrid or pure-attention
 model. With that wheel, offload the layers; for CPU scoring, use the PyPI wheel.
-
-## Marginal readout
-
-*Validated for correctness, not for a metric gain.* On Qwen3.5-4B, which answers with the letter
-directly, every result in this document is identical with or without it, and no committed workload
-needs it. It is here for checkpoints that put their first-token mass on a preamble token; the case
-that motivated it — Qwen3-8B answering `**` before the letter, 60 % of the mass leaking without it,
-10 % with a marginalised read — was measured outside this repository, on a mail-triage fixture that
-cannot be redistributed.
-
-
-`--llama-readout marginal` (shared mode, any `--llama-parallel` but `1`) changes how
-the answer is read, not what is asked. Some checkpoints want to emit a token
-*before* the letter — Qwen3-8B puts almost all of its next-token mass on the
-Markdown `**` token when the assistant turn starts empty, and reading only the
-last prompt position then reads that preamble instead of the answer. The
-marginal readout takes, for each branch, the most likely non-slot tokens above
-a floor (two probes, 5 %), appends each in one extra batched decode across all
-branches, reads the slot masses after it, and adds them to the direct slot
-masses weighted by the preamble's probability. `option_logits` then hold the
-natural logs of the summed masses, so `softmax` and temperature scaling keep
-working unchanged; `preamble_mass` records the share that came through a
-preamble. On Qwen3.5-4B, which answers with the letter directly, the readout
-changes nothing and `preamble_mass` stays at zero.
 
 ## Results
 
