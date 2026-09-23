@@ -1,0 +1,60 @@
+{
+ "fixture": "benchmarks/data/shape777.jsonl, first 5 states (105 decisions); fresh timed on the first state only",
+ "method": "semif_phase1.llamacpp_backend.score / score_shared timed directly (shape777.py only accepts the full fixture); warm model, wall time, output write excluded",
+ "gguf": "bartowski/Qwen_Qwen3.5-4B-GGUF Q4_K_M",
+ "cpu": "Intel Xeon W-11955M, 16 threads, llama-cpp-python 0.3.35 PyPI wheel",
+ "gpu": "RTX 3080 Laptop 16 GB, cu124 wheel",
+ "runs": {
+  "before_pr_cpu_state_restore": {
+   "mode": "cpu",
+   "states": 5,
+   "gpu_offload": false,
+   "n_gpu_layers": 0,
+   "fresh": {
+    "decisions": 21,
+    "seconds": 457.86226421000174,
+    "per_second": 0.04586532160765318
+   },
+   "shared": {
+    "decisions": 105,
+    "seconds": 213.48030593199655,
+    "per_second": 0.49184864871538736,
+    "state_seconds": 42.69606118639931
+   }
+  },
+  "after_pr_gpu_state_restore": {
+   "mode": "gpu-restore",
+   "states": 5,
+   "gpu_offload": true,
+   "n_gpu_layers": -1,
+   "fresh": {
+    "decisions": 21,
+    "seconds": 14.507362655000179,
+    "per_second": 1.447540845252258
+   },
+   "shared": {
+    "decisions": 105,
+    "seconds": 10.65108915699966,
+    "per_second": 9.858146754033724,
+    "state_seconds": 2.130217831399932
+   }
+  },
+  "after_pr_gpu_fanout": {
+   "mode": "gpu-fanout",
+   "states": 5,
+   "gpu_offload": true,
+   "n_gpu_layers": -1,
+   "fresh": {
+    "decisions": 21,
+    "seconds": 14.73041090300103,
+    "per_second": 1.4256221457964668
+   },
+   "shared": {
+    "decisions": 105,
+    "seconds": 9.390513983998972,
+    "per_second": 11.181496580369876,
+    "state_seconds": 1.8781027967997943
+   }
+  }
+ }
+}

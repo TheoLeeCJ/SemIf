@@ -54,17 +54,15 @@ export HF_HOME=/path/to/large-drive/huggingface
 pip install -e '.[test]'
 ```
 
-**CPU only:** the llama.cpp backend scores the same prompts from a local GGUF
-checkpoint with no CUDA device. Install `pip install -e '.[test,llamacpp]'`,
-fetch a GGUF (for example `Qwen_Qwen3.5-4B-Q4_K_M.gguf` from
-`bartowski/Qwen_Qwen3.5-4B-GGUF`), and add `--backend llamacpp --gguf
-/path/to/model.gguf`; `--llama-threads` caps the CPU threads. Prompt
-construction stays on the pinned reference tokenizer, so `prompt_sha256`
-matches the Torch backend row for row; scores carry the GGUF checksum and are
-conditional on the quantized weights. Direct and prefix-cached execution can
-have small numerical differences from different llama.cpp evaluation paths;
-compare decisions or probabilities with a tolerance rather than raw logits
-bit for bit. One loaded backend owns one stateful scoring context.
+**llama.cpp / GGUF:** the llama.cpp backend scores the same prompts from a local GGUF
+checkpoint, on CPU or with `--llama-gpu-layers` offloaded to a GPU. Install
+`pip install -e '.[test,llamacpp]'`, download a GGUF of the pinned model (for example
+`bartowski/Qwen_Qwen3.5-4B-GGUF`), and add `--backend llamacpp --gguf /path/to/model.gguf`.
+Layers are offloaded by default when the wheel can, and shared mode fans a state's questions
+out over copied sequences in as few batched decodes as the context allows — sized from the
+rows themselves, which also works on hybrid Qwen3.5 memories. Prompt hashes match the
+Torch backend; quantized option scores have small numerical differences. See
+[docs/LLAMACPP.md](docs/LLAMACPP.md).
 
 Run the owned examples:
 

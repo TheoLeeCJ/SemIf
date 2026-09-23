@@ -23,6 +23,13 @@ def main() -> None:
     parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
     parser.add_argument("--llama-threads", type=int,
                         help="CPU threads for --backend llamacpp (default: all visible cores)")
+    parser.add_argument("--llama-gpu-layers", default="auto",
+                        help="GPU layers for --backend llamacpp: 'auto' keeps llama.cpp's default (every layer "
+                             "when the library can offload), 0 forces CPU, N offloads N layers")
+    parser.add_argument("--llama-parallel", default="auto",
+                        help="Shared-mode branching for --backend llamacpp: 'auto' sizes each fan-out from the "
+                             "state's token counts over a unified KV buffer; N fixes n_seq_max; 1 restores "
+                             "state per decision")
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
@@ -51,6 +58,22 @@ def main() -> None:
             parser.error("--llama-threads must be positive")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
+    def _auto_or_int(name, value, minimum):
+        if value == "auto":
+            return "auto"
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            parser.error(f"{name} must be 'auto' or an integer")
+        if number < minimum:
+            parser.error(f"{name} must be 'auto' or at least {minimum}")
+        return number
+
+    args.llama_gpu_layers = _auto_or_int("--llama-gpu-layers", args.llama_gpu_layers, -1)
+    args.llama_parallel = _auto_or_int("--llama-parallel", args.llama_parallel, 1)
+    for name, value in (("--llama-gpu-layers", args.llama_gpu_layers), ("--llama-parallel", args.llama_parallel)):
+        if args.backend != "llamacpp" and value != "auto":
+            parser.error(f"{name} requires --backend llamacpp")
     if args.backend == "llamacpp":
         if args.mode == "reranker":
             parser.error("llama.cpp supports direct, serial, and shared modes; reranker requires torch")
@@ -75,7 +98,8 @@ def main() -> None:
 
         model, tokenizer, metadata = llamacpp_backend.load_model(
             args.model, args.revision, args.gguf,
-            threads=args.llama_threads, context_tokens=args.max_tokens)
+            threads=args.llama_threads, context_tokens=args.max_tokens,
+            gpu_layers=args.llama_gpu_layers, sequences=args.llama_parallel)
         direct, serial, shared = (llamacpp_backend.score, llamacpp_backend.SerialPrefixScorer,
                                   llamacpp_backend.score_shared)
     else:
