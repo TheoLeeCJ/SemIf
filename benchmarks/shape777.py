@@ -11,9 +11,18 @@ import time
 from pathlib import Path
 
 from semif_phase1.core import load_causal_model
-from semif_phase1.direct import score
-from semif_phase1.serial import SerialPrefixScorer
-from semif_phase1.shared import score_shared
+from semif_phase1.direct import score as torch_score
+from semif_phase1.serial import SerialPrefixScorer as TorchSerialPrefixScorer
+from semif_phase1.shared import score_shared as torch_score_shared
+
+
+def _gpu_name() -> str | None:
+    """The NVIDIA device name without importing a CUDA-enabled torch."""
+    for info in sorted(Path("/proc/driver/nvidia/gpus").glob("*/information")):
+        for line in info.read_text().splitlines():
+            if line.startswith("Model:"):
+                return line.split(":", 1)[1].strip()
+    return None
 
 
 def main() -> None:
@@ -23,17 +32,53 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-tokens", type=int, default=4096)
+    parser.add_argument("--backend", choices=("torch", "llamacpp"), default="torch")
+    parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
+    parser.add_argument("--llama-threads", type=int, help="CPU threads for --backend llamacpp")
+    parser.add_argument("--llama-gpu-layers", default="auto",
+                        help="GPU layers for --backend llamacpp: 'auto' (library default), 0 (CPU) or N")
+    parser.add_argument("--llama-parallel", default="auto",
+                        help="llama.cpp shared-mode branching: 'auto' (sized per state), N, or 1 (state restore)")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output must be new")
+    if args.backend == "llamacpp":
+        if args.gguf is None or not args.gguf.is_file():
+            parser.error("--backend llamacpp requires --gguf pointing at an existing GGUF file")
+        for name in ("llama_gpu_layers", "llama_parallel"):
+            value = getattr(args, name)
+            if value != "auto":
+                try:
+                    setattr(args, name, int(value))
+                except ValueError:
+                    parser.error(f"--{name.replace('_', '-')} must be 'auto' or an integer")
+    elif args.gguf is not None or args.llama_threads is not None or args.llama_gpu_layers != "auto" or args.llama_parallel != "auto":
+        parser.error("llama.cpp options require --backend llamacpp")
     rows = [json.loads(line) for line in args.input.read_text().splitlines() if line.strip()]
     groups = defaultdict(list)
     for row in rows:
         groups[row["group_id"]].append(row)
     if len(rows) != 777 or len(groups) != 37 or any(len(group) != 21 for group in groups.values()):
         parser.error("Expected the committed 37-state x 21-question fixture")
-    model, tokenizer, metadata = load_causal_model(args.model, args.revision, "cuda")
-    import torch
+    if args.backend == "llamacpp":
+        from semif_phase1 import llamacpp_backend
+
+        model, tokenizer, metadata = llamacpp_backend.load_model(
+            args.model, args.revision, args.gguf, threads=args.llama_threads,
+            context_tokens=args.max_tokens, gpu_layers=args.llama_gpu_layers,
+            sequences=args.llama_parallel)
+        score = llamacpp_backend.score
+        SerialPrefixScorer = llamacpp_backend.SerialPrefixScorer
+        score_shared = llamacpp_backend.score_shared
+        cuda = None
+        offloaded = metadata["n_gpu_layers"] != 0 and metadata["gpu_offload_supported"]
+        hardware = (_gpu_name() or "unknown GPU") if offloaded else "CPU"
+    else:
+        model, tokenizer, metadata = load_causal_model(args.model, args.revision, "cuda")
+        import torch as cuda
+
+        score, SerialPrefixScorer, score_shared = torch_score, TorchSerialPrefixScorer, torch_score_shared
+        hardware = cuda.cuda.get_device_name(0)
 
     first = next(iter(groups.values()))
     score(model, tokenizer, first[0], metadata, args.max_tokens)
@@ -45,13 +90,15 @@ def main() -> None:
         "version": "shape777-published-v1",
         "input_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
         "model": metadata,
-        "hardware": torch.cuda.get_device_name(0),
+        "hardware": hardware,
+        "backend": args.backend,
         "timing_scope": "Warm model; includes prompt construction, tokenization, transfers, forward passes and CPU readout.",
         "results": [],
     }
     predictions = {}
     for mode in ("fresh", "serial_prefix", "parallel_shared"):
-        torch.cuda.reset_peak_memory_stats()
+        if cuda is not None:
+            cuda.cuda.reset_peak_memory_stats()
         started = time.perf_counter()
         values, state_times = [], []
         for group in groups.values():
@@ -73,7 +120,7 @@ def main() -> None:
                 "wall_seconds": elapsed,
                 "decisions_per_second": len(values) / elapsed,
                 "state_p50_seconds": statistics.median(state_times),
-                "peak_cuda_bytes": torch.cuda.max_memory_allocated(),
+                "peak_cuda_bytes": cuda.cuda.max_memory_allocated() if cuda is not None else None,
             }
         )
     reference = {row["id"]: row for row in predictions["fresh"]}

@@ -7,11 +7,12 @@ import inspect
 import json
 import time
 
-from .core import direct_messages, softmax, synchronize
-from .direct import PROMPT_VERSION, encode_prompt
+from .core import resolve_prompt, softmax, synchronize
+from .direct import encode_prompt
 
 
-def _state_prefix(tokenizer, state) -> list[int]:
+def _state_prefix(tokenizer, state, prompt=None) -> list[int]:
+    prompt = resolve_prompt(prompt)
     row = {
         "id": "prefix-only",
         "state": state,
@@ -22,17 +23,17 @@ def _state_prefix(tokenizer, state) -> list[int]:
             {"id": "no", "description": "No"},
         ],
     }
-    turns = direct_messages(row)
-    prompt = tokenizer.apply_chat_template(
+    turns = prompt.messages(row)
+    rendered = tokenizer.apply_chat_template(
         turns, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     payload = turns[-1]["content"]
-    if prompt.count(payload) != 1:
+    if rendered.count(payload) != 1:
         raise ValueError("Cannot locate the unmodified evidence payload in the chat template")
-    evidence = json.dumps({"evidence": state}, ensure_ascii=False)[:-1]
+    evidence = prompt.evidence_text(state)
     if not payload.startswith(evidence):
         raise ValueError("Evidence serialization changed")
-    text = prompt[: prompt.index(payload)] + evidence
+    text = rendered[: rendered.index(payload)] + evidence
     # Appending JSON punctuation can merge with the final boundary token.
     return tokenizer.encode(text, add_special_tokens=False)[:-1]
 
@@ -51,17 +52,18 @@ def _suffix_layout(sequences: list[list[int]], prefix_length: int, pad_id: int):
     return {"input_ids": ids, "attention_mask": masks, "position_ids": positions}, ends
 
 
-def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096):
+def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096, prompt=None):
     """Return all option distributions together after one state prefill."""
     import torch
 
+    prompt = resolve_prompt(prompt)
     if not rows or any(row["state"] != rows[0]["state"] for row in rows[1:]):
         raise ValueError("Shared scoring requires one nonempty exact state")
     if len({row["id"] for row in rows}) != len(rows):
         raise ValueError("Decision IDs must be unique")
     started = time.perf_counter()
-    encoded = [encode_prompt(tokenizer, row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
+    encoded = [encode_prompt(tokenizer, row, max_tokens, prompt) for row in rows]
+    prefix = _state_prefix(tokenizer, rows[0]["state"], prompt)
     if not prefix or any(ids[: len(prefix)] != prefix or len(ids) <= len(prefix) for ids, _, _ in encoded):
         raise ValueError("The fixed state prefix does not match every full prompt")
     pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -154,7 +156,7 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                     "option_logits": selected,
                     "input_tokens": len(ids),
                     "prompt_sha256": prompt_hash,
-                    "prompt_version": PROMPT_VERSION,
+                    "prompt_version": prompt.version,
                     "model": {**metadata, "serving_config": (
                         "native-state-prefix-looped-v1" if looped else "native-state-prefix-parallel-v1"
                     )},

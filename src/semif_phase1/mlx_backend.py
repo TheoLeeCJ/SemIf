@@ -15,8 +15,8 @@ import platform
 import re
 import time
 
-from .core import softmax
-from .direct import PROMPT_VERSION, encode_prompt
+from .core import resolve_prompt, softmax
+from .direct import encode_prompt
 from .shared import _state_prefix
 
 
@@ -92,32 +92,33 @@ def load_model(source: str, revision: str, bits: int | None = None, *,
     return model, tokenizer, metadata
 
 
-def _result(row, encoded, selected, metadata, mode):
+def _result(row, encoded, selected, metadata, mode, prompt):
     ids, slots, prompt_hash = encoded
     return {
         "id": row["id"], "option_ids": [option["id"] for option in row["options"]],
         "probabilities": softmax(selected), "option_logits": selected,
         "answer_token_ids": slots, "input_tokens": len(ids),
         "input_ids_sha256": hashlib.sha256(json.dumps(ids).encode()).hexdigest(),
-        "prompt_sha256": prompt_hash, "prompt_version": PROMPT_VERSION,
+        "prompt_sha256": prompt_hash, "prompt_version": prompt.version,
         "model": {**metadata, "serving_config": f"mlx-{mode}-v1"},
         "readout": "native last-position logits restricted to declared answer slots; no generated tokens",
         "probability_status": "conditional option score; uncalibrated as decision confidence",
     }
 
 
-def score(model, tokenizer, row, metadata, max_tokens=4096):
+def score(model, tokenizer, row, metadata, max_tokens=4096, prompt=None):
     import mlx.core as mx
 
+    prompt = resolve_prompt(prompt)
     mx.synchronize()
     started = time.perf_counter()
-    encoded = encode_prompt(tokenizer, row, max_tokens)
+    encoded = encode_prompt(tokenizer, row, max_tokens, prompt)
     ids, slots, _ = encoded
     mark = time.perf_counter()
     logits = model(mx.array([ids]))[0, -1].astype(mx.float32)
     selected = logits[mx.array(slots)].tolist()
     mx.synchronize()
-    result = _result(row, encoded, selected, metadata, "direct")
+    result = _result(row, encoded, selected, metadata, "direct", prompt)
     result.update(forward_seconds=time.perf_counter() - mark, total_seconds=time.perf_counter() - started)
     return result
 
@@ -142,8 +143,9 @@ def _check_prefix(prefix, encoded):
 class SerialPrefixScorer:
     """Reuse only the current exact state; never mutate the retained prefix."""
 
-    def __init__(self, model, tokenizer, metadata, max_tokens=4096):
+    def __init__(self, model, tokenizer, metadata, max_tokens=4096, prompt=None):
         self.model, self.tokenizer, self.metadata = model, tokenizer, metadata
+        self.prompt = resolve_prompt(prompt)
         self.max_tokens = max_tokens
         self.prefix = self.cache = None
 
@@ -152,8 +154,8 @@ class SerialPrefixScorer:
 
         mx.synchronize()
         started = time.perf_counter()
-        encoded = encode_prompt(self.tokenizer, row, self.max_tokens)
-        prefix = _state_prefix(self.tokenizer, row["state"])
+        encoded = encode_prompt(self.tokenizer, row, self.max_tokens, self.prompt)
+        prefix = _state_prefix(self.tokenizer, row["state"], self.prompt)
         hit = self.cache is not None and prefix == self.prefix
         _check_prefix(prefix, [encoded])
         prefill_seconds = 0.0
@@ -174,7 +176,7 @@ class SerialPrefixScorer:
         selected = logits[mx.array(slots)].tolist()
         mx.synchronize()
         suffix_seconds = time.perf_counter() - mark
-        result = _result(row, encoded, selected, self.metadata, "serial")
+        result = _result(row, encoded, selected, self.metadata, "serial", self.prompt)
         result.update(cache_hit=hit, prefix_tokens=len(prefix), prefill_seconds=prefill_seconds,
                       copy_seconds=copy_seconds, suffix_forward_seconds=suffix_seconds,
                       forward_seconds=prefill_seconds + suffix_seconds,
@@ -182,7 +184,7 @@ class SerialPrefixScorer:
         return result
 
 
-def score_shared(model, tokenizer, rows, metadata, max_tokens=4096):
+def score_shared(model, tokenizer, rows, metadata, max_tokens=4096, prompt=None):
     """Prefill once, merge independent cache branches, then score padded suffixes.
 
     Right padding is masked by native recurrent caches. Causal attention prevents
@@ -197,8 +199,9 @@ def score_shared(model, tokenizer, rows, metadata, max_tokens=4096):
         raise ValueError("Decision IDs must be unique")
     mx.synchronize()
     started = time.perf_counter()
-    encoded = [encode_prompt(tokenizer, row, max_tokens) for row in rows]
-    prefix = _state_prefix(tokenizer, rows[0]["state"])
+    prompt = resolve_prompt(prompt)
+    encoded = [encode_prompt(tokenizer, row, max_tokens, prompt) for row in rows]
+    prefix = _state_prefix(tokenizer, rows[0]["state"], prompt)
     _check_prefix(prefix, encoded)
     suffixes = [ids[len(prefix):] for ids, _, _ in encoded]
     lengths = [len(ids) for ids in suffixes]
@@ -225,7 +228,7 @@ def score_shared(model, tokenizer, rows, metadata, max_tokens=4096):
     mx.eval(selected)
     mx.synchronize()
     suffix_seconds = time.perf_counter() - mark
-    results = [_result(row, enc, values.tolist(), metadata, "shared")
+    results = [_result(row, enc, values.tolist(), metadata, "shared", prompt)
                for row, enc, values in zip(rows, encoded, selected)]
     timing = {
         "total_seconds": time.perf_counter() - started, "encode_seconds": encode_seconds,

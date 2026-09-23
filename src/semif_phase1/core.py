@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -13,6 +14,98 @@ DIRECT_SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
     "Respond with only its uppercase letter, with no explanation or reasoning."
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class Prompt:
+    """The words of one direct-decision prompt: its system instruction and payload key names.
+
+    The payload shape never changes — evidence first, then the criterion, then the lettered
+    options — because the serial and shared modes cut the reusable state prefix at the end of the
+    evidence. A prompt only changes the words around that shape, so a model can be addressed in
+    the language of its evidence. Every prompt carries its own ``version``, written into each
+    result next to ``prompt_sha256``; the published numbers all use ``direct-options-v1``.
+    """
+
+    version: str
+    system: str
+    evidence_key: str = "evidence"
+    criterion_key: str = "criterion"
+    options_key: str = "options"
+    letter_key: str = "letter"
+    description_key: str = "description"
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value.strip() for value in (self.version, self.system)):
+            raise ValueError("A prompt needs a nonempty version and system instruction")
+        keys = self.keys()
+        if len(set(keys)) != len(keys) or not all(isinstance(key, str) and key.strip() for key in keys):
+            raise ValueError("Prompt payload keys must be distinct nonempty strings")
+
+    def keys(self) -> tuple[str, ...]:
+        return (self.evidence_key, self.criterion_key, self.options_key, self.letter_key, self.description_key)
+
+    def messages(self, row: dict) -> list[dict]:
+        validate_row(row)
+        payload = {
+            self.evidence_key: row["state"],
+            self.criterion_key: row["question"],
+            self.options_key: [
+                {self.letter_key: LETTERS[index], self.description_key: option["description"]}
+                for index, option in enumerate(row["options"])
+            ],
+        }
+        return [
+            {"role": "system", "content": self.system},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+
+    def evidence_text(self, state) -> str:
+        """The user payload up to the end of the evidence: the part every decision on a state shares."""
+        return json.dumps({self.evidence_key: state}, ensure_ascii=False)[:-1]
+
+
+DEFAULT_PROMPT = Prompt("direct-options-v1", DIRECT_SYSTEM)
+PROMPTS = {
+    "en": DEFAULT_PROMPT,
+    "fr": Prompt(
+        "direct-options-fr-v1",
+        "Applique le critère fourni aux éléments fournis. Choisis exactement une option de la liste. "
+        "Réponds uniquement par sa lettre majuscule, sans explication ni raisonnement.",
+        evidence_key="elements", criterion_key="critere", options_key="options",
+        letter_key="lettre", description_key="description",
+    ),
+}
+
+
+def resolve_prompt(spec=None) -> Prompt:
+    """A ``Prompt`` from its name (``en``, ``fr``), a JSON file, an existing ``Prompt``, or ``None``.
+
+    A file holds ``{"version": ..., "system": ..., "keys": {"evidence": ..., "criterion": ...,
+    "options": ..., "letter": ..., "description": ...}}``; ``keys`` and each of its entries are
+    optional and default to the English names. A custom prompt may not reuse a built-in version
+    string unless it is that prompt, so ``prompt_version`` in a result always means one wording.
+    """
+    if spec is None:
+        return DEFAULT_PROMPT
+    if isinstance(spec, Prompt):
+        return spec
+    if isinstance(spec, str) and spec in PROMPTS:
+        return PROMPTS[spec]
+    path = Path(spec)
+    if not path.is_file():
+        raise ValueError(f"Unknown prompt {spec!r}: expected one of {sorted(PROMPTS)} or a JSON file")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not {"version", "system"} <= data.keys():
+        raise ValueError(f"{path}: a prompt file needs 'version' and 'system'")
+    keys = data.get("keys") or {}
+    if not isinstance(keys, dict) or not keys.keys() <= {"evidence", "criterion", "options", "letter", "description"}:
+        raise ValueError(f"{path}: 'keys' may only rename evidence, criterion, options, letter, description")
+    prompt = Prompt(data["version"], data["system"], **{f"{name}_key": value for name, value in keys.items()})
+    for built_in in PROMPTS.values():
+        if prompt.version == built_in.version and prompt != built_in:
+            raise ValueError(f"{path}: version {prompt.version!r} belongs to a built-in prompt with other words")
+    return prompt
 
 
 def validate_row(row: dict) -> None:
@@ -40,20 +133,8 @@ def validate_row(row: dict) -> None:
         raise ValueError("Option IDs must be unique")
 
 
-def direct_messages(row: dict) -> list[dict]:
-    validate_row(row)
-    payload = {
-        "evidence": row["state"],
-        "criterion": row["question"],
-        "options": [
-            {"letter": LETTERS[index], "description": option["description"]}
-            for index, option in enumerate(row["options"])
-        ],
-    }
-    return [
-        {"role": "system", "content": DIRECT_SYSTEM},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-    ]
+def direct_messages(row: dict, prompt: Prompt | None = None) -> list[dict]:
+    return resolve_prompt(prompt).messages(row)
 
 
 def softmax(values: list[float]) -> list[float]:

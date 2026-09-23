@@ -48,6 +48,18 @@ CUDA_VISIBLE_DEVICES=0 python benchmarks/shape777_reranker.py \
   --output shape777-reranker-run.json
 ```
 
+The same fixture on a local GGUF through llama.cpp, layers offloaded by default when the wheel
+can, branches sized per state:
+
+```bash
+python benchmarks/shape777.py --backend llamacpp \
+  --model Qwen/Qwen3.5-4B \
+  --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
+  --gguf /path/to/Qwen_Qwen3.5-4B-Q4_K_M.gguf \
+  --input benchmarks/data/shape777.jsonl \
+  --output shape777-llamacpp-run.json
+```
+
 The 6.7 MB fixture is project-authored and has SHA-256 `8dcf414b12fc2684e3c4ca5f3ebfd3f525f5346fec4a9bc67eb65138101f55f1`. Both runners write aggregate timings and row-level predictions.
 
 ## Quality evidence

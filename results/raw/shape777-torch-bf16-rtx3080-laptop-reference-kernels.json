@@ -1,0 +1,63 @@
+{
+  "version": "shape777-published-v1",
+  "input_sha256": "8dcf414b12fc2684e3c4ca5f3ebfd3f525f5346fec4a9bc67eb65138101f55f1",
+  "model": {
+    "source": "Qwen/Qwen3.5-4B",
+    "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "dtype": "bfloat16",
+    "device": "cuda:0",
+    "torch_version": "2.10.0+cu128",
+    "transformers_version": "5.17.0"
+  },
+  "hardware": "NVIDIA GeForce RTX 3080 Laptop GPU",
+  "backend": "torch",
+  "timing_scope": "Warm model; includes prompt construction, tokenization, transfers, forward passes and CPU readout.",
+  "results": [
+    {
+      "mode": "fresh",
+      "wall_seconds": 706.6287687669974,
+      "decisions_per_second": 1.0995872717661834,
+      "state_p50_seconds": 19.052118502004305,
+      "peak_cuda_bytes": 9009487360
+    },
+    {
+      "mode": "serial_prefix",
+      "wall_seconds": 99.91493006100063,
+      "decisions_per_second": 7.776615562114906,
+      "state_p50_seconds": 2.6692993820033735,
+      "peak_cuda_bytes": 9104913920
+    },
+    {
+      "mode": "parallel_shared",
+      "wall_seconds": 75.8513996180045,
+      "decisions_per_second": 10.243713417459036,
+      "state_p50_seconds": 2.038362214996596,
+      "peak_cuda_bytes": 11836365824
+    }
+  ],
+  "comparisons_to_fresh": {
+    "serial_prefix": {
+      "max_probability_difference": 0.06241874674751252,
+      "argmax_flips": [
+        "21938acb79a8a74da58b",
+        "3b81128faa5361fb6f52",
+        "315f167030195f31a119",
+        "c70b4b1f019acff741d7"
+      ]
+    },
+    "parallel_shared": {
+      "max_probability_difference": 0.06712819910961632,
+      "argmax_flips": [
+        "8378b16d3504101615a3",
+        "ce624966eb527d833d3f",
+        "2f9b07aba6f967fa92dd",
+        "d0e0d78168e9332ff3fd",
+        "3b81128faa5361fb6f52",
+        "800d47937a344f61289f",
+        "315f167030195f31a119",
+        "c70b4b1f019acff741d7",
+        "8f2b2bf755ea1437abf1"
+      ]
+    }
+  }
+}
