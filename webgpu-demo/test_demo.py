@@ -62,6 +62,10 @@ def test_live_comparison_and_limits():
     assert "Route north" in text["worker.js"]
     assert "const MAX_OPTIONS = 20" in text["app.js"]
     assert "const MIN_OPTIONS = 2" in text["app.js"]
+    assert "const MAX_QUESTIONS = 5" in text["app.js"]
+    assert 'id="add-question"' in text["index.html"]
+    assert 'id="question-template"' in text["index.html"]
+    assert 'id="question-tabs"' in text["index.html"]
     for phrase in ("conditional probabilities", "not calibrated", "sequential", "warmup", "no backend"):
         assert phrase in combined.lower()
     assert "WebSocket" not in combined

@@ -7,7 +7,9 @@ This is a browser-only comparison of two readout paths through the same selected
 
 It is a live experiment, not a prerecorded benchmark. The page displays only timings collected in the current browser session. Model loading and shader warmup are reported separately from both decision paths. The paths run sequentially to avoid WebGPU contention.
 
-The account-support and email-triage buttons only prefill the editable inputs. They do not constrain the prompt or run the model. Options remain editable, with add/remove controls for two through twenty choices.
+The account-support and email-triage buttons only prefill the editable inputs with one question. They do not constrain the prompt or run the model. Options remain editable, with add/remove controls for two through twenty choices.
+
+Up to five questions can be asked about the same state, each with its own options. A run compares both paths for each question in order, one question at a time, and tabs above the results switch between questions. Timings and the ratio are per question; if one question fails, the remaining questions are skipped.
 
 ## Run locally
 
