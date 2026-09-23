@@ -24,6 +24,13 @@ def test_auto_uses_mps_without_cuda(torch_stub):
     assert resolve_device().name == "mps"
 
 
+def test_cpu_must_be_selected_explicitly(torch_stub):
+    torch_stub.backends.mps.is_available.return_value = False
+    assert resolve_device("cpu").name == "cpu"
+    with pytest.raises(ValueError, match="MPS is unavailable"):
+        resolve_device()
+
+
 def test_cuda_requires_exactly_one_gpu(torch_stub):
     torch_stub.cuda.is_available.return_value = True
     torch_stub.cuda.device_count.return_value = 1
@@ -51,7 +58,12 @@ def test_synchronization_dispatch(torch_stub, backend):
         torch_stub.mps.synchronize.assert_called_once_with()
 
 
-def test_loader_passes_device_dtype_and_revision(torch_stub, monkeypatch):
+@pytest.mark.parametrize("device,dtype,target", [
+    ("cuda", "bfloat16", "cuda:0"),
+    ("mps", "float16", "mps"),
+    ("cpu", "float32", "cpu"),
+])
+def test_loader_passes_device_dtype_and_revision(torch_stub, monkeypatch, device, dtype, target):
     model = Mock()
     factory = SimpleNamespace(from_pretrained=Mock(return_value=(model, {})))
     transformers = SimpleNamespace(
@@ -60,15 +72,19 @@ def test_loader_passes_device_dtype_and_revision(torch_stub, monkeypatch):
         AutoModelForCausalLM=factory, __version__="test",
     )
     monkeypatch.setitem(sys.modules, "transformers", transformers)
+    torch_stub.cuda.is_available.return_value = True
+    torch_stub.cuda.device_count.return_value = 1
     torch_stub.device = lambda name: name
+    torch_stub.bfloat16 = "bfloat16"
     torch_stub.float16 = "float16"
+    torch_stub.float32 = "float32"
     torch_stub.__version__ = "test"
     revision = "a" * 40
-    _, _, metadata = load_causal_model("test/model", revision, "mps", "float16")
+    _, _, metadata = load_causal_model("test/model", revision, device, dtype)
     kwargs = factory.from_pretrained.call_args.kwargs
-    assert kwargs["device_map"] == {"": "mps"}
-    assert kwargs["dtype"] == "float16"
+    assert kwargs["device_map"] == {"": target}
+    assert kwargs["dtype"] == dtype
     assert kwargs["revision"] == revision
     assert kwargs["trust_remote_code"] is False
-    assert metadata["device"] == "mps" and metadata["dtype"] == "float16"
+    assert metadata["device"] == target and metadata["dtype"] == dtype
     model.eval.assert_called_once()

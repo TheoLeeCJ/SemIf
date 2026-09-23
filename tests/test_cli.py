@@ -133,14 +133,21 @@ def test_torch_reranker_always_loads_cuda(run_cli, backends, flags):
     backends.mlx.load_model.assert_not_called()
 
 
-def test_torch_reranker_rejects_mps_before_loading(run_cli, backends, capsys):
+@pytest.mark.parametrize("device", ["mps", "cpu"])
+def test_torch_reranker_rejects_non_cuda_device_before_loading(run_cli, backends, capsys, device):
     run_cli.run("reranker")
     run_cli.output.unlink()
     with pytest.raises(SystemExit) as error:
-        run_cli.run("reranker", "--device", "mps")
+        run_cli.run("reranker", "--device", device)
     assert error.value.code == 2
     assert "Reranker mode requires CUDA" in capsys.readouterr().err
     assert backends.torch.reranker_score.call_count == 2
+
+
+def test_torch_cpu_selection_reaches_loader(run_cli, backends):
+    run_cli.run("direct", "--device", "cpu", "--dtype", "float32")
+    backends.torch.load_causal_model.assert_called_once_with(
+        "test/model", "a" * 40, "cpu", "float32")
 
 
 def test_existing_output_is_not_overwritten(run_cli, backends, capsys):
