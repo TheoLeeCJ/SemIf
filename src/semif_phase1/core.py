@@ -72,8 +72,8 @@ def digest(text: str) -> str:
 def resolve_device(device: str = "auto"):
     import torch
 
-    if device not in {"auto", "cuda", "mps", "xpu"}:
-        raise ValueError("Device must be auto, cuda, mps, or xpu")
+    if device not in {"auto", "cuda", "mps", "xpu", "cpu"}:
+        raise ValueError("Device must be auto, cuda, mps, xpu, or cpu")
     if device == "auto":
         if torch.cuda.is_available():
             device = "cuda"
@@ -85,6 +85,8 @@ def resolve_device(device: str = "auto"):
         if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
             raise ValueError("Expose exactly one CUDA GPU, for example with CUDA_VISIBLE_DEVICES")
         return torch.device("cuda:0")
+    if device == "cpu":
+        return torch.device("cpu")
     if device == "xpu":
         if getattr(torch, "xpu", None) is None or not torch.xpu.is_available() or torch.xpu.device_count() != 1:
             raise ValueError("Expose exactly one XPU GPU, for example with ONEAPI_DEVICE_SELECTOR")
@@ -113,11 +115,11 @@ def load_causal_model(
     dtype: str = "bfloat16",
     attn_implementation: str = "sdpa",
 ):
-    """Load one pinned causal model on a single CUDA, XPU, or Apple GPU.
+    """Load one pinned causal model on the resolved Torch device.
 
     Pass device="cuda" or device="xpu" to require that accelerator without
     falling back to the other. Leave it "auto" to prefer CUDA, then XPU,
-    then Apple MPS.
+    then Apple MPS. Pass device="cpu" for an explicit CPU run.
     """
     import torch
     import transformers

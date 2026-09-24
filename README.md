@@ -69,7 +69,9 @@ matches the Torch backend row for row; scores carry the GGUF checksum and are
 conditional on the quantized weights. Direct and prefix-cached execution can
 have small numerical differences from different llama.cpp evaluation paths;
 compare decisions or probabilities with a tolerance rather than raw logits
-bit for bit. One loaded backend owns one stateful scoring context.
+bit for bit. One loaded backend owns one stateful scoring context. For a much
+slower full-precision Torch reference path, explicitly pass
+`--device cpu --dtype float32` to the standard scorer command.
 
 Run the owned examples:
 
