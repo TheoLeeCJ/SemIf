@@ -72,32 +72,55 @@ def digest(text: str) -> str:
 def resolve_device(device: str = "auto"):
     import torch
 
-    if device not in {"auto", "cuda", "mps", "cpu"}:
-        raise ValueError("Device must be auto, cuda, mps, or cpu")
+    if device not in {"auto", "cuda", "mps", "xpu", "cpu"}:
+        raise ValueError("Device must be auto, cuda, mps, xpu, or cpu")
     if device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "mps"
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif getattr(torch, "xpu", None) is not None and torch.xpu.is_available():
+            device = "xpu"
+        else:
+            device = "mps"
     if device == "cuda":
         if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
             raise ValueError("Expose exactly one CUDA GPU, for example with CUDA_VISIBLE_DEVICES")
         return torch.device("cuda:0")
     if device == "cpu":
         return torch.device("cpu")
+    if device == "xpu":
+        if getattr(torch, "xpu", None) is None or not torch.xpu.is_available() or torch.xpu.device_count() != 1:
+            raise ValueError("Expose exactly one XPU GPU, for example with ONEAPI_DEVICE_SELECTOR")
+        return torch.device("xpu:0")
     if not torch.backends.mps.is_available():
         raise ValueError("MPS is unavailable; use an Apple Silicon Mac with an MPS-enabled PyTorch build")
     return torch.device("mps")
 
 
 def synchronize(device) -> None:
+    """Synchronize a CUDA, XPU, or MPS device. Other devices need no synchronization."""
     import torch
 
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+    elif device.type == "xpu":
+        torch.xpu.synchronize(device)
     elif device.type == "mps":
         torch.mps.synchronize()
 
 
-def load_causal_model(source: str, revision: str, device: str = "auto", dtype: str = "bfloat16"):
-    """Load one pinned causal model on the resolved Torch device."""
+def load_causal_model(
+    source: str,
+    revision: str,
+    device: str = "auto",
+    dtype: str = "bfloat16",
+    attn_implementation: str = "sdpa",
+):
+    """Load one pinned causal model on the resolved Torch device.
+
+    Pass device="cuda" or device="xpu" to require that accelerator without
+    falling back to the other. Leave it "auto" to prefer CUDA, then XPU,
+    then Apple MPS. Pass device="cpu" for an explicit CPU run.
+    """
     import torch
     import transformers
 
@@ -123,6 +146,7 @@ def load_causal_model(source: str, revision: str, device: str = "auto", dtype: s
         config=config,
         dtype=getattr(torch, dtype),
         device_map={"": str(target)},
+        attn_implementation=attn_implementation,
         low_cpu_mem_usage=True,
         output_loading_info=True,
         **common,
@@ -135,6 +159,7 @@ def load_causal_model(source: str, revision: str, device: str = "auto", dtype: s
         "revision": revision,
         "dtype": dtype,
         "device": str(target),
+        "attention": attn_implementation,
         "torch_version": torch.__version__,
         "transformers_version": transformers.__version__,
     }

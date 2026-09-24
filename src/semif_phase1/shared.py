@@ -8,7 +8,7 @@ import json
 import time
 
 from .core import direct_messages, softmax, synchronize
-from .direct import PROMPT_VERSION, encode_prompt
+from .direct import PROMPT_VERSION, _XPU_FORWARD_TOKEN_LIMIT, cached_forward, encode_prompt
 
 
 def _state_prefix(tokenizer, state) -> list[int]:
@@ -51,6 +51,38 @@ def _suffix_layout(sequences: list[list[int]], prefix_length: int, pad_id: int):
     return {"input_ids": ids, "attention_mask": masks, "position_ids": positions}, ends
 
 
+def _suffix_forward(model, inputs, cache, ends):
+    """Read each row's last real token, including rows ending in earlier chunks."""
+    import torch
+
+    ids = inputs["input_ids"]
+    width = ids.shape[1]
+    chunk_size = _XPU_FORWARD_TOKEN_LIMIT if ids.device.type == "xpu" else width
+    offset = inputs["attention_mask"].shape[1] - width
+    vocabularies = [None] * len(ends)
+    for start in range(0, width, chunk_size):
+        stop = min(start + chunk_size, width)
+        positions = sorted({end - start for end in ends if start <= end < stop})
+        output = model(
+            input_ids=ids[:, start:stop],
+            attention_mask=inputs["attention_mask"][:, :offset + stop],
+            position_ids=inputs["position_ids"][:, start:stop],
+            past_key_values=cache,
+            use_cache=True,
+            return_dict=True,
+            logits_to_keep=(torch.tensor(positions, dtype=torch.long, device=inputs["position_ids"].device)
+                            if positions else 1),
+        )
+        if ids.device.type == "xpu" and width > chunk_size:
+            cache = output.past_key_values
+            if cache is None:
+                raise RuntimeError("Long XPU scoring requires a native KV cache")
+        for index, end in enumerate(ends):
+            if start <= end < stop:
+                vocabularies[index] = output.logits[index, positions.index(end - start), :].float()
+    return vocabularies
+
+
 def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens: int = 4096):
     """Return all option distributions together after one state prefill."""
     import torch
@@ -81,12 +113,12 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
     with torch.inference_mode():
         sync()
         mark = time.perf_counter()
-        output = model(
-            input_ids=torch.tensor([prefix], dtype=torch.long, device=device),
-            attention_mask=torch.ones((1, len(prefix)), dtype=torch.long, device=device),
-            use_cache=True,
-            return_dict=True,
-            logits_to_keep=1,
+        output = cached_forward(
+            model,
+            {
+                "input_ids": torch.tensor([prefix], dtype=torch.long, device=device),
+                "attention_mask": torch.ones((1, len(prefix)), dtype=torch.long, device=device),
+            },
         )
         cache = output.past_key_values
         del output
@@ -130,18 +162,25 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
             sync()
             replicate_seconds = time.perf_counter() - mark
             mark = time.perf_counter()
-            output = model(
-                **inputs,
-                past_key_values=cache,
-                use_cache=True,
-                return_dict=True,
-                logits_to_keep=torch.tensor(selected_positions, dtype=torch.long, device=device),
-            )
-            sync()
-            suffix_seconds = time.perf_counter() - mark
-            vocabularies = [
-                output.logits[index, selected_positions.index(ends[index]), :].float() for index in range(len(rows))
-            ]
+            if device.type == "xpu" and inputs["input_ids"].shape[1] > _XPU_FORWARD_TOKEN_LIMIT:
+                vocabularies = _suffix_forward(model, inputs, cache, ends)
+                sync()
+                suffix_seconds = time.perf_counter() - mark
+            else:
+                output = model(
+                    **inputs,
+                    past_key_values=cache,
+                    use_cache=True,
+                    return_dict=True,
+                    logits_to_keep=torch.tensor(selected_positions, dtype=torch.long, device=device),
+                )
+                sync()
+                suffix_seconds = time.perf_counter() - mark
+                vocabularies = [
+                    output.logits[index, selected_positions.index(ends[index]), :].float()
+                    for index in range(len(rows))
+                ]
+                del output
         results = []
         for index, (row, (ids, slots, prompt_hash)) in enumerate(zip(rows, encoded)):
             vocabulary = vocabularies[index]
@@ -162,8 +201,6 @@ def score_shared(model, tokenizer, rows: list[dict], metadata: dict, max_tokens:
                     "probability_status": "conditional option score; uncalibrated as decision confidence",
                 }
             )
-        if not looped:
-            del output
         del cache
     sync()
     timing = {

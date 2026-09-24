@@ -28,8 +28,8 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-tokens", type=int, default=4096)
-    parser.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto",
-                        help="Torch device (auto prefers CUDA, then Apple MPS; CPU must be explicit)")
+    parser.add_argument("--device", choices=("auto", "cuda", "mps", "xpu", "cpu"), default="auto",
+                        help="Torch device (auto prefers CUDA, then Intel XPU, then Apple MPS; CPU must be explicit)")
     parser.add_argument("--dtype", choices=("bfloat16", "float16", "float32"), default="bfloat16",
                         help="Model precision; changing it can change option scores")
     args = parser.parse_args()
@@ -80,7 +80,7 @@ def main() -> None:
                                   llamacpp_backend.score_shared)
     else:
         if args.mode == "reranker":
-            if args.device in {"mps", "cpu"}:
+            if args.device in {"mps", "xpu", "cpu"}:
                 parser.error(f"Reranker mode requires CUDA; --device {args.device} is unsupported")
             # Keep auto CUDA-only and let the loader enforce one visible GPU.
             args.device = "cuda"

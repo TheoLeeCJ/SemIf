@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import inspect
 import json
 import time
 
 from .core import direct_messages, softmax, synchronize
-from .direct import PROMPT_VERSION, encode_prompt
+from .direct import PROMPT_VERSION, cached_forward, encode_prompt
 
 
 def _state_prefix(tokenizer, state) -> list[int]:
@@ -32,12 +31,7 @@ def _state_prefix(tokenizer, state) -> list[int]:
 
 
 def _cached_forward(model, inputs):
-    parameters = inspect.signature(model.forward).parameters
-    if "logits_to_keep" not in parameters and hasattr(model, "get_base_model"):
-        parameters = inspect.signature(model.get_base_model().forward).parameters
-    if "logits_to_keep" not in parameters:
-        raise RuntimeError("Model lacks selective last-position logits")
-    return model(**inputs, use_cache=True, return_dict=True, logits_to_keep=1)
+    return cached_forward(model, inputs)
 
 
 class SerialPrefixScorer:
