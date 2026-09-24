@@ -51,6 +51,7 @@ def test_loader_rejects_unavailable_explicit_device(monkeypatch, requested, avai
     }
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
         **accelerators, bfloat16="bf16", __version__="test"))
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace())
     with pytest.raises(ValueError, match=expected_error):
         load_causal_model("test/remote", "a" * 40, device=requested)
 
@@ -148,17 +149,20 @@ def test_chunked_cached_forward_matches_single_cache(length):
     ids = torch.randint(0, 32, (1, length))
     mask = torch.ones_like(ids)
     suffix = torch.randint(0, 32, (1, 7))
+    calls = []
+    model.register_forward_pre_hook(lambda model, args, kwargs: calls.append(kwargs["input_ids"].shape[1]), with_kwargs=True)
     with torch.inference_mode():
         reference = model(
             input_ids=torch.cat([ids, suffix], dim=1), attention_mask=torch.ones((1, length + 7)),
             use_cache=True, return_dict=True, logits_to_keep=1,
         ).logits[:, -1, :]
-        cache = cached_forward(model, {"input_ids": ids, "attention_mask": mask}).past_key_values
+        cache = cached_forward(model, {"input_ids": XpuInput(ids), "attention_mask": mask}).past_key_values
         assert cache.get_seq_length() == length
         actual = cached_forward(model, {
             "input_ids": suffix, "attention_mask": torch.ones((1, length + 7)),
             "past_key_values": cache,
         }).logits[:, -1, :]
+    assert calls[1:-1] == [1024] * (length // 1024) + [length % 1024]
     torch.testing.assert_close(actual, reference, atol=1e-6, rtol=1e-5)
 
 
@@ -197,3 +201,47 @@ def test_chunked_cached_suffix_threads_existing_cache():
             "past_key_values": cache,
         }).logits[:, -1, :]
     torch.testing.assert_close(actual, reference, atol=1e-6, rtol=1e-5)
+
+
+@pytest.mark.parametrize("xpu", [False, True])
+def test_shared_suffix_chunking_preserves_each_rows_readout(xpu):
+    import copy
+    import torch
+    from semif_phase1.shared import _suffix_forward, _suffix_layout
+
+    model = _tiny_qwen3()
+    prefix = torch.randint(0, 32, (1, 17))
+    lengths = [7, 1024, 1025, 3300]
+    sequences = [torch.randint(0, 32, (length,)).tolist() for length in lengths]
+    layout, ends = _suffix_layout(sequences, 17, 0)
+    inputs = {key: torch.tensor(value) for key, value in layout.items()}
+    calls = []
+    model.register_forward_pre_hook(
+        lambda model, args, kwargs: calls.append(kwargs["input_ids"].shape[1]), with_kwargs=True
+    )
+    with torch.inference_mode():
+        cache = model(input_ids=prefix, use_cache=True).past_key_values
+        cache.reorder_cache(torch.zeros(len(ends), dtype=torch.long))
+        expected = _suffix_forward(model, inputs, copy.deepcopy(cache), ends)
+        calls.clear()
+        if xpu:
+            inputs["input_ids"] = XpuInput(inputs["input_ids"])
+        actual = _suffix_forward(model, inputs, cache, ends)
+    assert calls == ([1024, 1024, 1024, 228] if xpu else [3300])
+    for left, right in zip(actual, expected):
+        torch.testing.assert_close(left, right, atol=1e-6, rtol=1e-5)
+
+
+def test_shared_chunked_suffix_rejects_missing_cache():
+    import torch
+    from semif_phase1.shared import _suffix_forward
+
+    class NoCache:
+        def __call__(self, **kwargs):
+            return SimpleNamespace(past_key_values=None)
+
+    ids = torch.ones((1, 1025), dtype=torch.long)
+    with pytest.raises(RuntimeError, match="native KV cache"):
+        _suffix_forward(NoCache(), {
+            "input_ids": XpuInput(ids), "attention_mask": ids, "position_ids": ids,
+        }, None, [1024])

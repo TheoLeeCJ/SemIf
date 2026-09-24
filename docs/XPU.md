@@ -43,8 +43,8 @@ ONEAPI_DEVICE_SELECTOR=level_zero:1 python -c \
   "import torch; [print(i, torch.xpu.get_device_properties(i).name) for i in range(torch.xpu.device_count())]"
 ```
 
-The loader raises an error when zero or more than one CUDA or XPU device is
-visible. The error message names both `CUDA_VISIBLE_DEVICES` and
+An explicit CUDA or XPU request requires exactly one visible device of
+that type. CUDA errors name `CUDA_VISIBLE_DEVICES`; XPU errors name
 `ONEAPI_DEVICE_SELECTOR`.
 
 ## The long-forward workaround
@@ -55,9 +55,10 @@ Qwen3.5 hybrid architecture. The cause is upstream in PyTorch XPU, not in
 this project.
 
 The direct, serial, and shared scorers all split a long XPU forward into
-short steps of 1024 tokens. Each step reuses the model's own KV cache. The
-final logits come from the last step. This chunked path gives the same
-result as one full forward on CPU. The workaround runs on XPU only. It does
+short steps of 1024 tokens. Each step reuses the model's own KV cache.
+Each row uses the logits at its last real token, including shared rows
+that end before the final chunk. CPU tests compare chunked and full
+forwards within floating-point tolerance. The workaround runs on XPU only. It does
 not change the CUDA or CPU path in any way.
 
 ## Reproducing the evidence: `benchmarks/xpu_benchmark.py`
@@ -77,6 +78,13 @@ python benchmarks/xpu_benchmark.py --suite shape --output results/xpu/my-a770-sh
 python benchmarks/xpu_benchmark.py --suite generation --output results/xpu/my-a770-generation
 python benchmarks/xpu_benchmark.py --suite all --output results/xpu/my-a770-run
 ```
+
+The committed direct and generation evidence predates this runner. It was
+produced by earlier XPU-enabled versions of the published benchmark
+scripts and retains their original schemas, including `peak_cuda_bytes`.
+The current CUDA-only scripts cannot reproduce those XPU runs, and this
+runner writes a different schema. The bundle has not been regenerated
+with the current code; validating it requires a new Arc hardware run.
 
 Each run requires a new output directory. The runner records:
 
@@ -117,8 +125,9 @@ reproduce today.
 
 Validated: direct, serial, and shared scoring reach drift grade against the
 published NVIDIA rows. Between 3 and 7 of 777 choices differ, with a
-maximum probability difference near 0.09. This sits inside the repository's
-own same-GPU drift range. Compact generation with the two settings above
+maximum probability difference of 0.1131. The published CUDA fresh/serial
+comparison has 5 choice changes; this single comparison does not establish
+a same-GPU drift range. Compact generation with the two settings above
 reproduced the published 21-item array exactly.
 
 Blocked: reranker mode is CUDA-only, matching the MPS and MLX precedent.

@@ -11,6 +11,19 @@ make that claim, and only at drift grade.
 The method and the review threshold are frozen in [manifest.json](manifest.json)
 before any comparison below. Every changed choice is reported.
 
+## Provenance
+
+This bundle predates `benchmarks/xpu_benchmark.py`. Earlier XPU-enabled
+versions of `shape777.py`, `shape777_reranker.py`, and
+`decision_vs_generation.py` produced it. Those scripts now require CUDA.
+The bundle retains its original schemas, including `peak_cuda_bytes`;
+the new runner writes a different schema with `peak_xpu_bytes`. These
+results have not been regenerated with the current PR code. A new Arc
+hardware run is needed to validate that code.
+
+Reranker evidence is historical only. The CLI now rejects XPU reranking,
+and the dedicated XPU runner has no reranker suite.
+
 ## Direct, serial, and shared scoring
 
 The full 37-state by 21-question fixture (777 decisions) ran in `fresh`,
@@ -23,8 +36,8 @@ The full 37-state by 21-question fixture (777 decisions) ran in `fresh`,
 | `parallel_shared` | 3 / 777 | 0.1131 |
 
 The published NVIDIA run itself has 5 / 777 flips between its own `fresh`
-and `serial` modes. The A770 result sits inside that same drift range for
-this BF16 workload.
+and `serial` modes. The A770 comparisons have 3 to 7 flips, including 7 for fresh scoring.
+One CUDA comparison does not establish a same-GPU drift range.
 
 Evidence: [shape777.json](2026-09-18-a770/shape777.json),
 [row-level predictions](2026-09-18-a770/shape777.jsonl.gz).
