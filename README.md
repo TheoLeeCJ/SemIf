@@ -199,6 +199,10 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Raw results and checksums](results/raw/)
 - [Third-party sources](THIRD_PARTY.md)
 
+## Related tools
+
+- [stuntdouble](https://github.com/ReallyArtificial/stuntdouble): a drop-in `/v1/systemone` proxy that shadows a hosted decision model with local ones on live traffic and reports agreement, a routing threshold, and cost. It imports `examples/decisions.jsonl` as a suite; a SemIf sidecar that wraps `semif-score` behind the same endpoint is [open for contribution](https://github.com/ReallyArtificial/stuntdouble/issues/2).
+
 ## Star history
 
 [![SemIf star history](https://api.star-history.com/svg?repos=TheoLeeCJ/SemIf&type=Date)](https://www.star-history.com/#TheoLeeCJ/SemIf&Date)
