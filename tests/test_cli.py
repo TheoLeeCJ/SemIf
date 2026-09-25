@@ -161,3 +161,51 @@ def test_existing_output_is_not_overwritten(run_cli, backends, capsys):
     assert run_cli.output.read_bytes() == original
     backends.torch.load_causal_model.assert_not_called()
     backends.mlx.load_model.assert_not_called()
+
+
+@pytest.mark.parametrize("mode,message", [
+    ("shared", "direct and serial"),
+    ("reranker", "direct and serial"),
+])
+def test_stabilize_order_rejects_unsupported_modes(run_cli, backends, capsys, mode, message):
+    with pytest.raises(SystemExit) as error:
+        run_cli.run(mode, "--stabilize-order", "2")
+    assert error.value.code == 2
+    assert message in capsys.readouterr().err
+    backends.torch.load_causal_model.assert_not_called()
+
+
+def test_stabilize_order_requires_k_at_least_two(run_cli, backends, capsys):
+    with pytest.raises(SystemExit) as error:
+        run_cli.run("direct", "--stabilize-order", "1")
+    assert error.value.code == 2
+    assert "K >= 2" in capsys.readouterr().err
+    backends.torch.load_causal_model.assert_not_called()
+
+
+def test_stabilize_order_averages_stubbed_direct_scores(run_cli, backends):
+    from semif_phase1.order import STABILIZE_PROMPT_VERSION
+
+    def score(model, tokenizer, row, metadata, max_tokens):
+        ids = [option["id"] for option in row["options"]]
+        # Prefer display slot 0 so identity and reverse disagree on semantics.
+        logits = [4.0] + [0.0] * (len(ids) - 1)
+        return {
+            "id": row["id"],
+            "option_ids": ids,
+            "option_logits": logits,
+            "probabilities": [0.9] + [0.1 / (len(ids) - 1)] * (len(ids) - 1),
+            "prompt_sha256": "x",
+            "prompt_version": "direct-options-v1",
+            "total_seconds": 0.05,
+            "model": metadata,
+        }
+
+    backends.torch.direct_score.side_effect = score
+    run_cli.run("direct", "--stabilize-order", "2", "--stabilize-order-seed", "0")
+    rows = [json.loads(line) for line in run_cli.output.read_text().splitlines()]
+    assert len(rows) == 2
+    assert all(row["prompt_version"] == STABILIZE_PROMPT_VERSION for row in rows)
+    assert all(row["stabilize_order"]["cost_multiplier"] == 2 for row in rows)
+    # Two permutations per input row.
+    assert backends.torch.direct_score.call_count == 4

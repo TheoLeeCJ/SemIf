@@ -191,6 +191,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
 - [Apple Silicon](docs/APPLE_SILICON.md) — MPS and optional MLX backends
 - [Calibration](docs/CALIBRATION.md) — fitted temperatures, out-of-fold evidence, and application
+- [Option order](docs/OPTION_ORDER.md) — order-sensitivity measurement and opt-in `--stabilize-order`
 - [EXL3 bridge](exl3-bridge/README.md) — quantized 27B runner and committed evidence
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
