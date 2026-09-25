@@ -200,6 +200,57 @@ def evaluate(gold,predictions,comparison=None):
     return result
 
 
+def calibrated_threshold_gate(gold, predictions, threshold=0.8, abstain_option=None):
+    """Generic auto-decide-versus-review gate on top-label confidence.
+
+    Intended for temperature-scaled prediction files (see docs/CALIBRATION.md). Unlike
+    ``screening_gate``, this does not require the frozen 96-row authored falsification
+    screen and does not change that screen's semantics.
+    """
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not 0 < threshold <= 1:
+        raise ValueError('calibrated threshold must be in (0, 1]')
+    rows = align(gold, predictions)
+    preds = indexed(predictions, 'predictions')
+    temperatures = []
+    for row in rows:
+        pred = preds.get(row['id'])
+        cal = (pred or {}).get('calibration') or {}
+        if cal.get('method') == 'temperature_scaling' and 'temperature' in cal:
+            temperatures.append(cal['temperature'])
+    decisions = []
+    automatic = review = automatic_correct = 0
+    for row in rows:
+        available = row['status'] == 'distribution' and row['confidence'] is not None
+        accept = available and row['confidence'] >= threshold
+        if abstain_option is not None and row['predicted_id'] == abstain_option:
+            accept = False
+        disposition = 'automatic_semantic_decision' if accept else 'review'
+        if accept:
+            automatic += 1
+            automatic_correct += bool(row['correct'])
+        else:
+            review += 1
+        decisions.append(dict(id=row['id'], choice=row['predicted_id'], confidence=row['confidence'],
+                              disposition=disposition, correct=row['correct'], status=row['status']))
+    unique_t = sorted({t for t in temperatures})
+    return dict(
+        policy=dict(version='calibrated-threshold-v1', threshold=threshold,
+                    abstain_option=abstain_option,
+                    scope='any hard-label workload; not the frozen 96-row screen'),
+        rows=len(rows),
+        automatic_decisions=automatic,
+        review_decisions=review,
+        automatic_accuracy=(automatic_correct / automatic) if automatic else None,
+        coverage=automatic / len(rows) if rows else 0.0,
+        temperature_scaling_rows=len(temperatures),
+        applied_temperatures=unique_t,
+        calibrated_predictions=len(temperatures) == len(predictions) and len(unique_t) <= 1,
+        decisions=decisions,
+        limitation='A threshold on temperature-scaled confidence is an operating point, '
+                   'not Jev-level operational calibration.',
+    )
+
+
 def screening_gate(gold, predictions, policy='distribution', threshold=0.8):
     """Frozen semantic-decision gate; not a benchmark of executed workflow actions."""
     if policy not in ('distribution', 'native') or threshold != 0.8:
@@ -276,10 +327,20 @@ if __name__=='__main__':
         parser.add_argument('--'+name,required=True)
     parser.add_argument('--comparison')
     parser.add_argument('--screen-policy', choices=('distribution','native'))
+    parser.add_argument('--calibrated-threshold', type=float,
+                        help='Generic auto-decide vs review gate on top-label confidence (any workload).')
+    parser.add_argument('--abstain-option',
+                        help='Option id that is never auto-decided under --calibrated-threshold.')
     args=parser.parse_args()
-    result=evaluate(read_jsonl(args.gold),read_jsonl(args.predictions),read_jsonl(args.comparison) if args.comparison else None)
+    if args.abstain_option is not None and args.calibrated_threshold is None:
+        parser.error('--abstain-option requires --calibrated-threshold')
+    gold, predictions = read_jsonl(args.gold), read_jsonl(args.predictions)
+    result=evaluate(gold, predictions, read_jsonl(args.comparison) if args.comparison else None)
     if args.screen_policy:
-        result['screening_gate'] = screening_gate(read_jsonl(args.gold), read_jsonl(args.predictions), args.screen_policy)
+        result['screening_gate'] = screening_gate(gold, predictions, args.screen_policy)
+    if args.calibrated_threshold is not None:
+        result['calibrated_threshold_gate'] = calibrated_threshold_gate(
+            gold, predictions, args.calibrated_threshold, args.abstain_option)
     with Path(args.output).open('x') as destination:
         destination.write(json.dumps(result,indent=2,allow_nan=False)+'\n')
     print(json.dumps({k:result[k] for k in ('scored','coverage','mean_family_balanced_accuracy')}))
