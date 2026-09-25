@@ -31,6 +31,8 @@ TypeSafe extraction reads four locally supplied, hash-verified `*-cases.js` snap
 
 Thirty-six owned original cases received three output-blind variants: reverse the displayed option order while preserving semantic IDs, wrap the criterion in meaning-preserving wording, and append irrelevant owned context. A separate 36-row missing-evidence population tests whether a system selects `insufficient`. Stability is measured after aligning probabilities by semantic option ID.
 
+The CPU measurement harness and optional `--stabilize-order K` mitigation for letter-slot order sensitivity are documented in [OPTION_ORDER.md](OPTION_ORDER.md). That opt-in readout is separately versioned and is not part of the frozen quality tables.
+
 ## Browser model ladder
 
 Qwen3-0.6B, MiniCPM5-2B, and Qwen3.5-4B use the same frozen prompt and native BF16 final-position option-logit scorer on the 144 authored, 108 perturbation, and 102 selected TypeSafe rows. TypeSafe modal agreement is averaged within each of the 20 source cases and then equally across cases. The browser artifacts are independently pinned GGUF quantizations. Browser smoke timings begin after the page initiates each operation; model files were served from a local SSD to exclude internet transfer time. A successful smoke requires model load, warmup, finite logits for every displayed option, and completion of the generated path. It does not establish full quantized quality or portable latency.

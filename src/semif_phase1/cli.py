@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .core import load_causal_model, validate_row
 from .direct import score as direct_score
+from .order import check_stabilize_k, score_with_stabilized_order
 from .reranker import score as reranker_score
 from .serial import SerialPrefixScorer
 from .shared import score_shared
@@ -32,6 +33,11 @@ def main() -> None:
                         help="Torch device (auto prefers CUDA, then Apple MPS; CPU must be explicit)")
     parser.add_argument("--dtype", choices=("bfloat16", "float16", "float32"), default="bfloat16",
                         help="Model precision; changing it can change option scores")
+    parser.add_argument("--stabilize-order", type=int, metavar="K", default=None,
+                        help="Opt-in: score K option permutations, average logits by semantic id, "
+                             "then softmax (cost multiplier K; default off)")
+    parser.add_argument("--stabilize-order-seed", type=int, default=0,
+                        help="RNG seed used when sampling which K permutations to score")
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
@@ -49,6 +55,13 @@ def main() -> None:
             parser.error("--llama-threads requires --backend llamacpp")
         if args.llama_threads < 1:
             parser.error("--llama-threads must be positive")
+    if args.stabilize_order is not None:
+        try:
+            check_stabilize_k(args.stabilize_order)
+        except ValueError as error:
+            parser.error(str(error))
+        if args.mode in {"shared", "reranker"}:
+            parser.error("--stabilize-order supports direct and serial modes only")
     if args.backend == "mlx" and args.mode == "reranker":
         parser.error("MLX supports direct, serial, and shared modes; reranker requires torch")
     if args.backend == "llamacpp":
@@ -94,12 +107,26 @@ def main() -> None:
         elif args.mode == "serial":
             scorer = serial(model, tokenizer, metadata, args.max_tokens)
             for row in rows:
-                destination.write(json.dumps(scorer.score(row), allow_nan=False) + "\n")
+                if args.stabilize_order is None:
+                    result = scorer.score(row)
+                else:
+                    result = score_with_stabilized_order(
+                        scorer.score, row, k=args.stabilize_order, seed=args.stabilize_order_seed)
+                destination.write(json.dumps(result, allow_nan=False) + "\n")
                 destination.flush()
         else:
             scorer = direct if args.mode == "direct" else reranker_score
+
+            def score_once(row):
+                return scorer(model, tokenizer, row, metadata, args.max_tokens)
+
             for row in rows:
-                destination.write(json.dumps(scorer(model, tokenizer, row, metadata, args.max_tokens), allow_nan=False) + "\n")
+                if args.stabilize_order is None or args.mode == "reranker":
+                    result = score_once(row)
+                else:
+                    result = score_with_stabilized_order(
+                        score_once, row, k=args.stabilize_order, seed=args.stabilize_order_seed)
+                destination.write(json.dumps(result, allow_nan=False) + "\n")
                 destination.flush()
 
 

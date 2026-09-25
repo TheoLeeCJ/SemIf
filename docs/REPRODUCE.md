@@ -76,6 +76,19 @@ python benchmarks/evaluate_perturbations.py \
 cmp perturbation-report.json results/raw/perturbation-comparison.json
 ```
 
+For option-order flips, total variation, and position bias alone (CPU, no model):
+
+```bash
+python benchmarks/evaluate_option_order.py \
+  --gold benchmarks/data/authored144.jsonl \
+  --perturbations benchmarks/data/perturbations108.jsonl \
+  --base-predictions results/raw/predictions/direct-authored144.jsonl \
+  --perturbation-predictions results/raw/predictions/direct-perturbations108.jsonl \
+  --output /tmp/option-order-direct.json
+```
+
+Details and the opt-in `--stabilize-order K` flag are in [OPTION_ORDER.md](OPTION_ORDER.md).
+
 ## Reproduce the headline speed results
 
 Run the focused three-repeat direct-versus-compact-array comparison:

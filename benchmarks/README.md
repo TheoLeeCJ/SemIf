@@ -27,6 +27,19 @@ python benchmarks/build_perturbations.py \
 
 `docs/REPRODUCE.md` gives the complete command for rebuilding `results/raw/perturbation-comparison.json` from the committed row-level predictions. The regenerated report is byte-identical to the committed report.
 
+Recompute the option-order sensitivity digest (flips, total variation, position bias) from those same committed files without loading a model:
+
+```bash
+python benchmarks/evaluate_option_order.py \
+  --gold benchmarks/data/authored144.jsonl \
+  --perturbations benchmarks/data/perturbations108.jsonl \
+  --base-predictions results/raw/predictions/direct-authored144.jsonl \
+  --perturbation-predictions results/raw/predictions/direct-perturbations108.jsonl \
+  --output /tmp/option-order-direct.json
+```
+
+See [OPTION_ORDER.md](../docs/OPTION_ORDER.md) for the opt-in `--stabilize-order K` scorer flag and its `K×` cost. Do not mix stabilize-order outputs into frozen quality tables.
+
 ## Full 37×21 systems benchmark
 
 ```bash
