@@ -16,9 +16,10 @@ Only confidence changes. Options here are runtime-defined and variable in count,
 per-class calibrators (Platt, vector, matrix scaling) do not apply; a single scalar
 is also the most data-efficient choice at these sample sizes.
 
-`benchmarks/calibrate.py` fits `T`, evaluates it, and can emit a calibrated
-predictions file. It uses numpy only and runs offline on CPU (the committed
-predictions already carry `option_logits`, so no model is loaded).
+`semif-calibrate` (and the back-compat `python benchmarks/calibrate.py`) fits `T`,
+evaluates it, and can emit a calibrated predictions file. It uses numpy only and
+runs offline on CPU (the committed predictions already carry `option_logits`, so
+no model is loaded).
 
 ## Finding
 
@@ -84,7 +85,9 @@ closely there, so an auto-decide-versus-review gate has a real operating point.
 Note this is *not* wired into `benchmarks/evaluate.py`'s `screening_gate`: that gate
 is frozen to the 96-row authored falsification screen (four variants per group, three
 specific families) and does not run on WANLI or Every. Its semantics are left
-unchanged; a generic calibrated-threshold gate for other workloads is future work.
+unchanged. For other workloads, pass temperature-scaled predictions into evaluate
+with `--calibrated-threshold` (optional `--abstain-option`) to get a generic
+auto-decide-versus-review operating point on top-label confidence.
 
 ## Ceiling and future work
 
@@ -103,16 +106,26 @@ unchanged; a generic calibrated-threshold gate for other workloads is future wor
 python benchmarks/fetch_sources.py --output build/sources
 python benchmarks/build_wanli.py --source build/sources/wanli-test.jsonl --selection benchmarks/manifests/source-selection.jsonl --output build/gold-wanli256.jsonl
 python benchmarks/build_every.py --archive build/sources/every-source.zip --experiments build/sources/every-experiments.json --selection benchmarks/manifests/source-selection.jsonl --output-dir build/every
-python benchmarks/calibrate.py --gold benchmarks/data/authored144.jsonl --predictions results/raw/predictions/direct-authored144.jsonl --report build/authored144.json --calibrated-out build/direct-authored144.calibrated.jsonl
-python benchmarks/calibrate.py --gold build/gold-wanli256.jsonl --predictions results/raw/predictions/direct-wanli256.jsonl --report build/wanli256.json --calibrated-out build/direct-wanli256.calibrated.jsonl
-python benchmarks/calibrate.py --gold build/every/gold154.jsonl --predictions results/raw/predictions/direct-every204.jsonl --report build/every154.json --calibrated-out build/direct-every204.calibrated.jsonl
-python benchmarks/calibrate.py --manifest results/raw/calibration/workloads.json --summary build/summary.json
+semif-calibrate --gold benchmarks/data/authored144.jsonl --predictions results/raw/predictions/direct-authored144.jsonl --report build/authored144.json --calibrated-out build/direct-authored144.calibrated.jsonl
+semif-calibrate --gold build/gold-wanli256.jsonl --predictions results/raw/predictions/direct-wanli256.jsonl --report build/wanli256.json --calibrated-out build/direct-wanli256.calibrated.jsonl
+semif-calibrate --gold build/every/gold154.jsonl --predictions results/raw/predictions/direct-every204.jsonl --report build/every154.json --calibrated-out build/direct-every204.calibrated.jsonl
+semif-calibrate --manifest results/raw/calibration/workloads.json --summary build/summary.json
 ```
 
 To apply an already selected temperature without gold data or refitting:
 
 ```bash
-python benchmarks/calibrate.py --predictions predictions.jsonl --temperature 1.23 --calibrated-out calibrated.jsonl
+semif-calibrate --predictions predictions.jsonl --temperature 1.23 --calibrated-out calibrated.jsonl
+```
+
+To score a generic calibrated-threshold gate on those outputs (does not touch the
+frozen 96-row screen):
+
+```bash
+python benchmarks/evaluate.py --gold benchmarks/data/authored144.jsonl \
+  --predictions build/direct-authored144.calibrated.jsonl \
+  --output build/authored144.eval.json \
+  --calibrated-threshold 0.8 --abstain-option insufficient
 ```
 
 The committed reports and `summary.json` are the frozen outputs of these commands;
@@ -122,5 +135,5 @@ paths are produced by the build steps above).
 Self-check (argmax invariance and out-of-fold improvement on committed authored data):
 
 ```bash
-python -c "import sys; sys.path.insert(0,'benchmarks'); import calibrate; calibrate.demo()"
+python -c "from semif_phase1.calibration import demo; demo()"
 ```

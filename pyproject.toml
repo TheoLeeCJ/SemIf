@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 semif-score = "semif_phase1.cli:main"
+semif-calibrate = "semif_phase1.calibration:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
