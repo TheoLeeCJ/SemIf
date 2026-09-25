@@ -4,7 +4,7 @@ from pathlib import Path
 WEBGPU = Path(__file__).resolve().parent
 
 def sources():
-    return {name: (WEBGPU / name).read_text() for name in ("index.html", "app.js", "worker.js", "README.md", "_headers")}
+    return {name: (WEBGPU / name).read_text(encoding ='utf-8') for name in ("index.html", "app.js", "worker.js", "README.md", "_headers")}
 
 def test_static_runtime_and_pins():
     text = sources()
