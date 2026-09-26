@@ -26,6 +26,10 @@ This baseline reads typed option probabilities directly from a model. No answer 
 
 ### Latest changes
 
+**2026-09-26**
+
+- Added semantic-profile clustering: a frozen five-probe battery, feature extraction, MiniBatchKMeans/HDBSCAN clustering into a versioned catalog, and a create-only `semif-cluster` CLI with a runnable [Colab notebook](colab/Semif_Clustering.ipynb).
+
 **2026-09-22**
 
 - Added PyTorch/MPS scoring for Apple Silicon — [@dp-IED](https://github.com/dp-IED) in [#15](https://github.com/TheoLeeCJ/SemIf/pull/15).
@@ -167,6 +171,19 @@ Option probabilities are useful only when their confidence matches observed accu
 
 Calibration does not change the selected option. The clear improvement is on WANLI; the intervals overlap on the authored and Every workloads. See the [method, caveats, and reproduction commands](docs/CALIBRATION.md).
 
+### Semantic-profile clustering
+
+The classifier chooses among categories you supply; clustering first discovers groups across records. A frozen five-probe battery (billing, account access, urgency, refund, security — each affirm/deny/insufficient) turns every record into one four-dimension feature vector after a single shared-state prefill. MiniBatchKMeans or HDBSCAN then clusters those profiles into a versioned catalog with representatives and noise records:
+
+```bash
+pip install -e '.[test,cluster]'
+semif-cluster profiles --input records.jsonl --output probes.jsonl
+# score probes with semif-score --mode shared, then:
+semif-cluster cluster --input scorings.jsonl --output catalog.json --method hdbscan
+```
+
+Scoring stays in `semif-score`; `semif-cluster` never loads a model. Feature order and the battery are versioned (`BATTERY_VERSION`); clustering artifacts carry battery, source, and parameter provenance. Try it with the owned [40-record example](examples/cluster_records.jsonl) and the [Colab notebook](colab/Semif_Clustering.ipynb).
+
 ## Input
 
 ```json
@@ -191,6 +208,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
 - [Apple Silicon](docs/APPLE_SILICON.md) — MPS and optional MLX backends
 - [Calibration](docs/CALIBRATION.md) — fitted temperatures, out-of-fold evidence, and application
+- [Clustering Colab notebook](colab/Semif_Clustering.ipynb) — end-to-end semantic-profile clustering run
 - [EXL3 bridge](exl3-bridge/README.md) — quantized 27B runner and committed evidence
 - [Interactive replay](demo/index.html)
 - [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
