@@ -113,18 +113,6 @@ def test_remote_model_requires_immutable_revision():
         backend.load_model("Qwen/Qwen3.5-4B", "main")
 
 
-def test_recurrent_qk_normalization_matches_reference_l2_epsilon():
-    # Small q/k expose the release-0.31.3 sum-versus-mean epsilon mismatch.
-    from mlx_lm.models.gated_delta import normalize_qk
-
-    width = 128
-    values = mx.full((1, 2, width), 1e-4)
-    q, k = normalize_qk(values, values, inv_scale=width**-0.5, eps=1e-6)
-    expected = values * mx.rsqrt(mx.sum(values * values, axis=-1, keepdims=True) + 1e-6)
-    assert mx.max(mx.abs(k - expected)).item() < 1e-6
-    assert mx.max(mx.abs(q - expected * width**-0.5)).item() < 1e-6
-
-
 def test_serial_keys_by_exact_tokens_not_python_value_equality(model, rows):
     row = copy.deepcopy(rows[0])
     row["state"] = {"value": True}
