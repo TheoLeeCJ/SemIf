@@ -13,6 +13,36 @@ from pathlib import Path
 from semif_phase1.core import load_causal_model, softmax
 from semif_phase1.reranker import score_pair_batch
 
+REPORT_VERSION = "shape777-reranker-v1"
+TIMING_SCOPE = (
+    "Warm loaded model; wall time includes prompt construction, tokenization, "
+    "padding, H2D, native forward, D2H and option normalization; excludes model "
+    "load and output write."
+)
+TOP_LEVEL_FIELDS = (
+    "version",
+    "input_sha256",
+    "model",
+    "hardware",
+    "max_tokens",
+    "timing_scope",
+    "semantic_contract",
+    "results",
+)
+RESULT_FIELDS = (
+    "pair_batch_size",
+    "judgments",
+    "states",
+    "wall_seconds",
+    "forward_seconds",
+    "judgments_per_second",
+    "state_latency_p50_seconds",
+    "state_latency_p95_seconds",
+    "padded_tokens",
+    "yes_no_pair_forwards",
+    "peak_cuda_bytes",
+)
+
 
 def percentile(values, fraction):
     ordered = sorted(values)
@@ -49,10 +79,12 @@ def main() -> None:
     warm = next(iter(groups.values()))[0]
     score_pair_batch(model, tokenizer, [(warm, option) for option in warm["options"]], args.max_tokens)
     report = {
-        "version": "shape777-reranker-published-v1",
+        "version": REPORT_VERSION,
         "input_sha256": hashlib.sha256(args.input.read_bytes()).hexdigest(),
         "model": metadata,
         "hardware": torch.cuda.get_device_name(0),
+        "max_tokens": args.max_tokens,
+        "timing_scope": TIMING_SCOPE,
         "semantic_contract": (
             "Two independent yes/no relevance passes per binary decision; "
             "option log-odds normalized only for relative comparison."
@@ -94,12 +126,14 @@ def main() -> None:
         record = {
             "pair_batch_size": size,
             "judgments": len(predictions),
+            "states": len(groups),
             "wall_seconds": elapsed,
             "forward_seconds": forward_seconds,
             "judgments_per_second": len(predictions) / elapsed,
             "state_latency_p50_seconds": statistics.median(state_times),
             "state_latency_p95_seconds": percentile(state_times, 0.95),
             "padded_tokens": padded_tokens,
+            "yes_no_pair_forwards": sum(len(row["options"]) for row in rows),
             "peak_cuda_bytes": torch.cuda.max_memory_allocated(),
         }
         report["results"].append(record)
