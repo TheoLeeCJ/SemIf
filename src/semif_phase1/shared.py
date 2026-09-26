@@ -6,6 +6,7 @@ import copy
 import inspect
 import json
 import time
+from itertools import takewhile
 
 from .core import direct_messages, softmax, synchronize
 from .direct import PROMPT_VERSION, encode_prompt
@@ -33,8 +34,12 @@ def _state_prefix(tokenizer, state) -> list[int]:
     if not payload.startswith(evidence):
         raise ValueError("Evidence serialization changed")
     text = prompt[: prompt.index(payload)] + evidence
-    # Appending JSON punctuation can merge with the final boundary token.
-    return tokenizer.encode(text, add_special_tokens=False)[:-1]
+    # Appending the next field's punctuation can merge with the final boundary token
+    # by an amount that depends on the state text, so trim to the longest common
+    # prefix instead of assuming the merge is always exactly one token.
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    extended = tokenizer.encode(text + payload[len(evidence) :], add_special_tokens=False)
+    return [first for first, _ in takewhile(lambda pair: pair[0] == pair[1], zip(ids, extended))]
 
 
 def _suffix_layout(sequences: list[list[int]], prefix_length: int, pad_id: int):
