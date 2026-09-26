@@ -1,0 +1,40 @@
+{"id": "bill-01", "state": "I was charged $49.99 twice on my March invoice for the same subscription renewal. Please look into the duplicate payment."}
+{"id": "bill-02", "state": "My credit card shows a pending charge from your company but I cancelled my plan last month. Why am I still being billed?"}
+{"id": "bill-03", "state": "Can you send me a copy of my January invoice? I need the VAT number and the itemized charges for my expense report."}
+{"id": "bill-04", "state": "The amount on my latest bill is $12 higher than the price quoted when I upgraded. I want to understand the pricing difference before paying."}
+{"id": "bill-05", "state": "I tried to pay my bill online three times and every transaction failed with a card error, but my bank says the payments went through."}
+{"id": "bill-06", "state": "Please update the billing address on my account. My company moved offices and our invoices need the new address for tax purposes."}
+{"id": "bill-07", "state": "I noticed a recurring $4.99 charge I don't recognize on my statement. It started appearing after I signed up for the trial."}
+{"id": "acct-01", "state": "I forgot my password and the reset email never arrives. I've checked spam and waited over an hour. I'm locked out of my account."}
+{"id": "acct-02", "state": "My account was locked after too many login attempts. I need someone to unlock it so I can sign in again."}
+{"id": "acct-03", "state": "I changed my phone number and can no longer receive the two-factor authentication codes. How do I update my login settings?"}
+{"id": "acct-04", "state": "Every time I try to log in I get an 'invalid credentials' error, but I'm certain my password is correct. I reset it yesterday."}
+{"id": "acct-05", "state": "I want to change the email address associated with my account because my old work email is being deactivated next week."}
+{"id": "acct-06", "state": "Our team account has a former employee listed as admin. We need to remove their access and assign a new administrator."}
+{"id": "acct-07", "state": "I created an account with a typo in my username and now I can't access it. The confirmation email went to an address I don't own."}
+{"id": "refund-01", "state": "The headphones I ordered arrived broken and I want my money back. I requested a return last week but haven't heard anything about my refund."}
+{"id": "refund-02", "state": "I cancelled my subscription within the 30-day trial period and was still charged. I'd like a full refund as per your money-back guarantee."}
+{"id": "refund-03", "state": "It's been 14 business days since my return was delivered to your warehouse. Where is my refund? The order number is 55481."}
+{"id": "refund-04", "state": "I accidentally purchased the annual plan instead of monthly and I'd like to be reimbursed for the difference. The charge went through an hour ago."}
+{"id": "refund-05", "state": "The software doesn't work on my operating system despite your compatibility claims. I want a refund for my purchase."}
+{"id": "refund-06", "state": "My flight was cancelled and I was promised a reimbursement within 5 days. It's now been three weeks and my card shows nothing."}
+{"id": "refund-07", "state": "I was double-charged for order 9923. One charge was reversed but the second one is still pending. Please refund the duplicate."}
+{"id": "sec-01", "state": "I received an email claiming to be from your security team asking me to verify my password via a link. This looks like phishing. Can you confirm?"}
+{"id": "sec-02", "state": "There were three login attempts on my account from an IP address in a country I've never visited. I've already changed my password. What else should I do?"}
+{"id": "sec-03", "state": "I think my account has been compromised. Someone changed my recovery email and made purchases I didn't authorize."}
+{"id": "sec-04", "state": "I noticed a device I don't recognize in my active sessions list. I signed it out but I'm worried my data was accessed."}
+{"id": "sec-05", "state": "Your website's SSL certificate appears to be expired, and my browser is showing a 'connection not secure' warning. Is it safe to enter my card details?"}
+{"id": "sec-06", "state": "A caller claiming to be your support agent asked me to install remote access software to 'fix my account'. I hung up but want to report this scam attempt."}
+{"id": "sec-07", "state": "I got a notification that my password appeared in a data breach. I use the same password on your site. Should I change it immediately?"}
+{"id": "urg-01", "state": "URGENT: our production servers are down and customers can't checkout. This outage has been going for 40 minutes. We need an engineer on this immediately."}
+{"id": "urg-02", "state": "Our entire team of 200 people cannot work because your service is completely down. This is costing us thousands per hour. Escalate this now."}
+{"id": "urg-03", "state": "Critical: our data export job failed overnight and we have a regulatory filing deadline at 9 AM today. Time is extremely tight, please prioritize."}
+{"id": "urg-04", "state": "This is time-sensitive: our payment integration stopped working an hour before our biggest sale of the year. We are losing revenue as I type this."}
+{"id": "urg-05", "state": "EMERGENCY: we believe customer data is being exposed through your API right now. Please treat this as a priority-one security incident and respond ASAP."}
+{"id": "urg-06", "state": "We go live with a national TV campaign in 3 hours and your platform won't let us publish. This cannot wait until tomorrow, we need help in the next hour."}
+{"id": "urg-07", "state": "Our contract renewal meeting is this afternoon and our account dashboard shows wrong usage figures. We need this corrected within the next 4 hours."}
+{"id": "misc-01", "state": "What are your office hours on weekends? I'd like to visit your store to see the new product line in person."}
+{"id": "misc-02", "state": "Do you offer student discounts? I'm starting university in September and comparing options from several vendors."}
+{"id": "misc-03", "state": "I really enjoyed your recent webinar on automation. Could you share the slide deck or a recording with attendees?"}
+{"id": "misc-04", "state": "I'm writing a blog post about industry trends and would love an interview with someone from your product team. Who should I contact?"}
+{"id": "misc-05", "state": "Is your service available in France? I'm relocating next month and want to know if I can keep using it and in which language."}

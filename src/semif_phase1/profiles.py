@@ -79,6 +79,19 @@ def _option_ids(options: list[dict]) -> list[str]:
     return [option["id"] for option in options]
 
 
+def _scoring_option_ids(scoring: dict) -> list[str]:
+    """Option ids from native scorer output (option_ids) or committed rows (options)."""
+    if "option_ids" in scoring:
+        ids = scoring["option_ids"]
+        if not isinstance(ids, list) or not all(isinstance(value, str) for value in ids):
+            raise ValueError("option_ids must be a list of option-id strings")
+        return list(ids)
+    options = scoring.get("options")
+    if options is None:
+        raise ValueError("scoring needs 'option_ids' (native scorer output) or 'options' (committed row)")
+    return _option_ids(options)
+
+
 def _entropy(probabilities: list[float]) -> float:
     """Shannon entropy (base 2) of a probability vector."""
     total = 0.0
@@ -91,6 +104,9 @@ def _entropy(probabilities: list[float]) -> float:
 def features_for_record(record_id: str, probe_scorings: list[dict]) -> dict:
     """Build one frozen-order feature vector from scored probe rows for one record.
 
+    Accepts either scoring shape: native scorer output (``option_ids`` as a list of
+    option-id strings, as returned by ``direct.score`` and ``score_shared``) or
+    committed rows (``options`` as a list of option dicts).
     Strictness: every scored row id must match exactly one expected ``record_id::axis``.
     Unknown ids, missing axes, duplicate axes, wrong option schema/order, or
     non-finite/non-normalized probabilities all raise loudly. This prevents silent
@@ -108,8 +124,7 @@ def features_for_record(record_id: str, probe_scorings: list[dict]) -> dict:
             raise ValueError(f"Duplicate scored row id {row_id!r} for record {record_id!r}")
 
         probabilities = scoring["probabilities"]
-        option_ids = _option_ids(scoring["options"])
-        if option_ids != [option["id"] for option in OPTION_SCHEMA]:
+        if _scoring_option_ids(scoring) != [option["id"] for option in OPTION_SCHEMA]:
             raise ValueError(f"{row_id}: option ids differ from frozen schema")
         if len(probabilities) != len(OPTION_SCHEMA):
             raise ValueError(f"{row_id}: probability length differs from option count")

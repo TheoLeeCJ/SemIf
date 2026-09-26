@@ -30,6 +30,15 @@ def _scoring(record_id, axis, probabilities=(0.7, 0.2, 0.1)):
     }
 
 
+def _native_scoring(record_id, axis, probabilities=(0.7, 0.2, 0.1)):
+    """Shape actually returned by direct.score and score_shared."""
+    return {
+        "id": f"{record_id}::{axis}",
+        "probabilities": list(probabilities),
+        "option_ids": [option["id"] for option in OPTION_SCHEMA],
+    }
+
+
 def _full_scorings(record_id, probabilities=(0.7, 0.2, 0.1)):
     return [_scoring(record_id, axis, probabilities) for axis in AXES]
 
@@ -78,6 +87,21 @@ def test_features_are_frozen_order_and_finite():
     assert [entry["axis"] for entry in result["probe_probabilities"]] == list(AXES)
 
 
+def test_features_accept_native_scorer_output():
+    """direct.score/score_shared emit option_ids (strings), not options (dicts)."""
+    result = features_for_record("rec-1", [_native_scoring("rec-1", axis) for axis in AXES])
+    assert result["feature"][0] == pytest.approx(0.7)
+    assert result["probe_count"] == len(AXES)
+
+    mixed = [
+        *[_native_scoring("a", axis) for axis in AXES],
+        *[_scoring("b", axis) for axis in AXES],
+    ]
+    artifacts = aggregate(mixed)
+    assert {entry["record_id"] for entry in artifacts} == {"a", "b"}
+    assert all(entry["probe_count"] == len(AXES) for entry in artifacts)
+
+
 def test_features_reject_missing_duplicate_and_unknown_axes():
     with pytest.raises(ValueError, match="missing scored axes"):
         features_for_record("rec-1", _full_scorings("rec-1")[:-1])
@@ -100,6 +124,16 @@ def test_features_reject_schema_drift_and_bad_probabilities():
     nonfinite = _scoring("rec-1", AXES[0], probabilities=(float("nan"), 0.0, 0.0))
     with pytest.raises(ValueError, match="non-finite"):
         features_for_record("rec-1", [nonfinite, *_full_scorings("rec-1")[1:]])
+
+
+    malformed_ids = _native_scoring("rec-1", AXES[0])
+    malformed_ids["option_ids"] = ["affirm", 2, "insufficient"]
+    with pytest.raises(ValueError, match="option_ids must be a list"):
+        features_for_record("rec-1", [malformed_ids, *_full_scorings("rec-1")[1:]])
+
+    missing_both = {"id": f"rec-1::{AXES[0]}", "probabilities": [0.7, 0.2, 0.1]}
+    with pytest.raises(ValueError, match="'option_ids' .* or 'options'"):
+        features_for_record("rec-1", [missing_both, *_full_scorings("rec-1")[1:]])
 
 
 def test_aggregate_groups_by_record():
